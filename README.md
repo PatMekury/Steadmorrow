@@ -9,7 +9,7 @@ With Node.js 20 or later, run `npm run dev` or `node scripts/serve.mjs`, then op
 ## What is implemented
 
 - The opening section: original green Steadmorrow plot icon and italic wordmark, two-line headline, one primary Get started action, and the approved city animation.
-- The 8-second video autoplays muted when the page opens, then holds its final frame. The headline and Get started remain visible. The small video control offers play, pause, and replay; offscreen or hidden-tab playback pauses.
+- The 8-second video autoplays muted when the page opens, and loops continuously. The headline and Get started remain visible. The small video control offers play, pause, and replay; offscreen or hidden-tab playback pauses.
 - Get started scrolls directly to `#experience` and moves keyboard focus to its heading.
 - Responsive desktop/mobile layout, keyboard focus, a static image fallback, and reduced-motion support. The user explicitly requested video autoplay; the visible pause control is always available. Reduced motion disables interface transitions and smooth scrolling.
 - Local Outfit font with its license; no external font or media requests.
@@ -35,3 +35,5 @@ The city is an illustrative concept. It is not a surveyed parcel, verified housi
 ## Checks
 
 `npm run check` checks JavaScript syntax. Browser validation is recorded in `docs/verification.md`.
+
+The header includes a black “For Churches” descriptor centered beneath the full icon-and-wordmark at 18–22px. The hero headline uses a slightly smaller responsive scale, and the background video loops.

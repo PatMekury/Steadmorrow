@@ -15,3 +15,5 @@ Only the first page section is implemented: a green editable icon/wordmark, the 
 The implementation is vanilla HTML/CSS/JavaScript with a small dependency-free Node development server. No framework, backend, Google Maps, or Gloo integration has been implemented yet. The approved animation is a concept, not a map or feasibility result. Brand color is centralized in `styles.css` as `--brand-color`. The user requested muted autoplay and removal of the Concept illustration caption. Keep the headline and Get started visible during playback.
 
 Preserve the reference composition: green icon + italic wordmark at upper left, a bold centered two-line headline, small black pill action, and the city filling the opening view. Preserve the animation's approved density, shared ground/building material, and exposure. Do not swap in the earlier conversation-note prototype from the research workspace.
+
+The user requested a slightly smaller headline (about 11% reduction), a continuously looping background video, and a black “For Churches” descriptor beneath the green brand, centered beneath the full icon-and-wordmark at a readable 18–22px. Keep these refinements.

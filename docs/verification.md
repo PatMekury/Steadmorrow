@@ -8,7 +8,7 @@ Checked September 18, 2026 against the app running locally at http://127.0.0.1:5
 - Local Outfit loaded successfully (`document.fonts.check`); green live brand color resolves to rgb(87, 204, 126).
 - Actual browser visual review: desktop 1440×900, tablet 768×1024, mobile 390×844, and short mobile 320×480. No horizontal overflow. The short mobile stage and parent both measure 500px and no longer overlap the next section.
 - Get started: URL becomes #experience, the heading receives keyboard focus, and the section aligns at viewport top on the tested mobile layout.
-- Updated autoplay: after reload, autoplay=true, paused=false, currentTime>0, and Pause is exposed. The headline stays visible, and the concept caption is absent. Completion holds the final frame with Replay; replay, pause, and the correct Play label were checked. Get started still reaches sectionY=0 and focuses its heading.
+- Updated autoplay: after reload, autoplay=true, paused=false, currentTime>0, and Pause is exposed. The headline stays visible, and the concept caption is absent. The user subsequently enabled continuous looping; replay, pause, and the correct Play label were checked. Get started still reaches sectionY=0 and focuses its heading.
 - Standalone SVG logo opens correctly, with embedded Outfit font and editable text.
 - Browser console: no errors or warnings observed during the reviewed flow.
 
