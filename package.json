@@ -3,11 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Steadmorrow opening section and city animation",
+  "description": "Steadmorrow landing page and Google Maps land selection",
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "start": "node scripts/serve.mjs",
-    "check": "node --check app.js && node --check scripts/serve.mjs"
+    "check": "node --check app.js && node --check land.js && node --check geometry.js && node --check scripts/serve.mjs",
+    "test": "node --test tests/geometry.test.mjs tests/server.test.mjs"
   },
   "engines": {
     "node": ">=20"
