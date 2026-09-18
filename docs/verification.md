@@ -41,3 +41,28 @@ The first land-section styling was rejected by the user. It was rebuilt against 
 - One click produced four handles; keyboard corner adjustment changed the geometry; Use this area displayed the saved confirmation. The temporary test selection was cleared afterward.
 - JavaScript syntax check passed after markup/state changes. Geometry and server modules were unchanged by this visual revision; the earlier 15-test result applies to them.
 - Visuals were compared with actual rendered guide pages. The working composition is an adaptation, not a claim of a pixel-identical reference screen.
+
+## Compact map-and-finder refinement — September 18, 2026
+
+This revision supersedes the preceding centered-form visual checks. The map is on the left and the address finder/selection controls are on the right on desktop. The user requested less visible instruction, a light selector, and immediate dismissal of unused address matches. Working controls now use paper and brand green; the approved hero is unchanged.
+
+- Actual default desktop render: map and finder align side by side in one compact view, with no introductory paragraph or visible keyboard-help panel. The active selection pill is green on a paper background.
+- Actual mobile renders at 390×844 and 320×780: search, selection modes, map, and summary stack without horizontal document overflow. Map tools and controls fit within the viewport.
+- Live Places search returned five matches. Choosing one immediately hid the result container, removed all result buttons from the DOM, and reset aria-expanded to false. The selected address remained as concise context.
+- Submitting a search and then changing the query left zero result options, kept the panel closed, and left Find property enabled after the request settled. Request tokens are invalidated on editing, selection, Escape, and map failure. Escape behavior was reviewed in code, not separately exercised in this browser pass.
+- Click to select created four handles. Pointer dragging changed the area from about 2.51 acres to about 2.1 acres. Use this area showed the compact confirmation; Adjust area reopened editing.
+- Keyboard focus revealed the otherwise clipped adjustment controls. Moving a corner north changed the area; Undo restored it. Arrow keys and Enter placed four polygon corners and enabled Use this area. The controls disappeared again on leaving their focus. Clear retains Undo access even with an empty outline.
+- Test geometry was cleared and the original Houston, TX search text and Click to select mode were restored. Reload showed the empty selection state. Browser error log was empty.
+- npm run check passed; all 15 existing geometry/server tests passed. No new tests were added for the styling change. The temporary mobile viewport override was reset.
+
+The local preview server had stopped before this pass; it was restarted at http://127.0.0.1:5173. A stale in-app error tab was replaced for verification. No cloud, billing, key, parcel lookup, or research integration changed.
+
+## Live suggestions and larger editing controls — September 18, 2026
+
+- Address suggestions from AutocompleteSuggestion loaded with the saved demo key for the partial inputs `7120 Grand` and `7120 Grand Bou`, without submitting the form. Five options appeared and typing focus remained in the input.
+- ArrowDown highlighted an option; Enter fetched its location and moved the map. Pointer selection also worked on mobile. Both immediately removed the alternatives. Escape dismissed the dropdown/pending debounce. Request-sequence guards cover stale suggestions and pending place-detail lookups.
+- Undo and Clear are in the right-hand column under selection modes. Desktop measurements: 164px wide, 56px high, 16px text; their left edges are beyond the map's right edge. Clear removed the test outline; Undo restored it.
+- Real wheel input over the map changed zoom from 18 to 19 while pageY stayed at 590.4px. Wheel input over the right panel changed pageY to 374.4px while zoom stayed at 19. No Ctrl modifier was used.
+- Actual desktop and 390x844 mobile renders were reviewed, including the suggestion dropdown and larger controls. The dropdown has its own scrollable list and visible Google Maps attribution. The temporary mobile viewport was reset.
+- Test geometry was cleared and the original Houston, TX query restored before reloading the preview.
+- npm run check and git diff --check passed. Geometry and server code were unchanged; the previous 15-test result remains applicable. No billing or key settings changed.

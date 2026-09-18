@@ -22,7 +22,7 @@ Brand color is centralized in `styles.css` as `--brand-color`. The user requeste
 
 ### Land selection
 
-`land.js`, `land.css`, and `geometry.js` implement live Google Maps, deliberate-submit property/address search using `Place.searchByText`, Map/Satellite views, selection, and confirmation. Maps loads lazily as `#experience` approaches the viewport; search is not triggered for every keystroke.
+`land.js`, `land.css`, and `geometry.js` implement live Google Maps, address suggestions while typing using `AutocompleteSuggestion`, Map/Satellite views, selection, and confirmation. Maps loads lazily as `#experience` approaches the viewport. Suggestions start after two characters with a 200ms debounce, use session tokens, and preserve typing focus. Arrow keys highlight a suggestion; Enter chooses the highlighted option and Escape dismisses. Find property retains a `Place.searchByText` fallback. Ignore stale suggestion and place-details responses; keep Google Maps attribution in the dropdown.
 
 Keep both user-requested selection modes:
 
@@ -46,4 +46,10 @@ The static server allowlist serves the browser app files and assets, not dotfile
 
 The user requires adherence to `C:\Users\patmekury\Documents\Gloo hackathon\output\pdf\Website_Design_Reference_and_Style_Guide.pdf`. The first land-selection workbench was explicitly rejected for departing from it. Read the relevant pages and inspect the reference screenshots before styling new UI; compare actual desktop and mobile renders against them. Generic frontend skill suggestions cannot replace this reference.
 
-The corrected land section uses a 1280px content maximum, white/paper and neutral colors, Outfit 600 headings (64/64 desktop, 40/44 mobile), a 64px paper input with 12px corners and green focus, solid green selected pills, black primary actions, and a standalone 24px rounded map. The previous enclosing bordered workbench, sage-tinted rows, pale blue active controls, and small input treatment are rejected. Preserve the user's blue polygon and white/dark corner handles. See `docs/design-reference.md` for page mappings and adaptations.
+The user's subsequent refinement requires a compact desktop layout with the map on the left and address finder on the right. The selector uses a light paper surface with a brand-green active segment; land-section actions use green. The dark selector and earlier centered form are superseded. Remove visible introductory and Keyboard controls prose; retain keyboard placement and corner adjustment through controls that appear on keyboard focus. Selecting a search result must remove its alternatives. Editing the query or pressing Escape also clears them, and stale responses must not reopen dismissed results.
+
+Keep the guide's 1280px maximum, neutral surfaces, Outfit 600, 64px paper field with 12px corners and green focus, and 24px rounded map. The compact land heading is 48/52 desktop and 40/44 mobile, with 48px desktop top padding. Mobile stacks search, selection modes, map, and summary. These explicit user refinements override the previous land layout while retaining the guide as the visual reference. Preserve the approved hero, its black Get started action, and the blue four-corner selection. See `docs/design-reference.md` for the distinction between source values and product adaptations.
+
+The user subsequently requested larger Undo and Clear controls in the right-hand panel. They now sit below the selection modes with 56px height and 16px labels. Keep scroll-wheel zoom over the map without Ctrl (`gestureHandling: greedy`), and normal page scrolling outside it. Do not intercept wheel events on the page.
+
+Undo and Clear must remain visible beneath the right-hand selection modes even before drawing. Disable unavailable actions instead of hiding the control group; hide the empty corner-progress label. This corrects the user's inability to find the controls.

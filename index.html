@@ -55,12 +55,8 @@
     <section class="experience land-experience" id="experience" aria-labelledby="experience-title">
       <div class="land-inner">
         <header class="land-intro">
-          <div class="experience-intro">
-            <h2 id="experience-title" tabindex="-1">Start with the land.</h2>
-          </div>
-          <p>Find the property, then select the vacant land you want to explore.</p>
+          <h2 id="experience-title" tabindex="-1">Start with the land.</h2>
         </header>
-
         <div class="land-workbench">
           <div class="property-finder">
             <form id="property-search" class="property-search" role="search" aria-label="Find a property">
@@ -68,18 +64,23 @@
                 <label for="property-query">Property address</label>
                 <div class="property-input-wrap">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>
-                  <input id="property-query" name="propertyQuery" type="search" placeholder="Enter an address, church, or town" autocomplete="off" maxlength="240" aria-describedby="search-status">
+                  <input id="property-query" name="propertyQuery" type="search" role="combobox" aria-autocomplete="list" placeholder="Address, church, or town" autocomplete="off" maxlength="240" aria-describedby="search-status" aria-controls="result-list" aria-expanded="false">
+                  <div id="search-results" class="search-results" hidden>
+                    <div id="result-list" class="result-list" role="listbox" aria-label="Address suggestions"></div>
+                    <p class="search-attribution" translate="no">Google Maps</p>
+                  </div>
                 </div>
               </div>
-              <button id="find-property" class="land-button land-button-dark" type="submit" disabled>Find property <span aria-hidden="true">↗</span></button>
+              <button id="find-property" class="land-button land-button-green" type="submit" disabled>Find property <span aria-hidden="true">↗</span></button>
             </form>
+            <p id="result-announcement" class="land-sr-only" role="status" aria-live="polite"></p>
             <p id="search-status" class="search-status" role="status" aria-live="polite"></p>
-            <div id="search-results" class="search-results" hidden>
-              <h3>Choose a place</h3>
-              <div id="result-list" class="result-list"></div>
-            </div>
-          </div>
 
+          <div class="land-map-heading">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>
+            <p id="place-label">Find a property or explore the map.</p>
+          </div>
+          </div>
           <div class="land-toolbar" role="group" aria-label="Area selection tools">
             <div class="selection-modes" role="group" aria-label="Selection method">
               <button id="mode-polygon" class="land-tool" type="button" aria-pressed="false" aria-describedby="selection-help">
@@ -91,8 +92,19 @@
                 Click to select
               </button>
             </div>
-          </div>
 
+            <div class="selection-actions" role="group" aria-label="Edit selected area">
+              <span id="corner-progress" class="corner-progress" aria-live="polite">0 of 4 corners</span>
+              <button id="undo-area" class="land-tool land-tool-quiet" type="button" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5 3 10l5 5M3 10h11a6 6 0 0 1 0 12" transform="translate(0 -2)"/></svg>
+                Undo
+              </button>
+              <button id="clear-area" class="land-tool land-tool-quiet" type="button" disabled>Clear</button>
+            </div>
+            <p id="selection-help" class="land-sr-only"></p>
+            <p id="selection-error" class="selection-error" role="alert" hidden></p>
+          </div>
+          <div class="land-map-column">
           <div class="map-stage">
             <div id="land-map" class="land-map" aria-label="Property map"></div>
             <div class="map-view-tools" role="group" aria-label="Map view">
@@ -111,60 +123,34 @@
               <p id="map-message-text">Loading the map…</p>
               <button id="map-retry" class="land-button land-button-outline" type="button" hidden>Try again</button>
             </div>
-          </div>
 
-          <div class="land-map-context">
-          <div class="land-map-heading">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>
-            <p id="place-label">Find a property or explore the map.</p>
-          </div>
-            <div class="selection-actions" role="group" aria-label="Edit selected area">
-              <span id="corner-progress" class="corner-progress" aria-live="polite">0 of 4 corners</span>
-              <button id="undo-area" class="land-tool land-tool-quiet" type="button" disabled>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5 3 10l5 5M3 10h11a6 6 0 0 1 0 12" transform="translate(0 -2)"/></svg>
-                Undo
-              </button>
-              <button id="clear-area" class="land-tool land-tool-quiet" type="button" disabled>Clear</button>
-            </div>
-          </div>
-
-          <div class="land-selection-info">
-            <div class="selection-guidance">
-              <p id="selection-help">Choose Polygon to place four corners, or Click to select to start with an adjustable area.</p>
-              <p id="selection-error" class="selection-error" role="alert" hidden></p>
-            </div>
-            <details id="keyboard-help" class="keyboard-help">
-              <summary>Keyboard controls</summary>
-              <div class="keyboard-content">
-                <p>Zoom in, then focus the placement button below. Use the arrow keys to move the map and Enter to place a corner or select an area.</p>
-                <button id="keyboard-place" class="land-button land-button-outline" type="button" aria-describedby="selection-help">Place at map center</button>
-                <div id="corner-adjust" class="corner-adjust" hidden>
-                  <label for="keyboard-corner">Adjust corner</label>
-                  <select id="keyboard-corner" name="keyboardCorner">
-                    <option value="0">Corner 1</option>
-                    <option value="1">Corner 2</option>
-                    <option value="2">Corner 3</option>
-                    <option value="3">Corner 4</option>
-                  </select>
-                  <div class="corner-nudge" role="group" aria-label="Move selected corner">
-                    <button class="nudge-button" data-nudge="north" type="button" aria-label="Move corner north">↑</button>
-                    <button class="nudge-button" data-nudge="west" type="button" aria-label="Move corner west">←</button>
-                    <button class="nudge-button" data-nudge="south" type="button" aria-label="Move corner south">↓</button>
-                    <button class="nudge-button" data-nudge="east" type="button" aria-label="Move corner east">→</button>
-                  </div>
+            <div class="keyboard-access" aria-label="Map selection">
+              <p id="keyboard-instructions" class="land-sr-only">Use arrow keys to move the map center, and Enter to select. To adjust a corner, choose its number and use the direction buttons.</p>
+              <button id="keyboard-place" class="land-button land-button-outline" type="button" aria-describedby="keyboard-instructions selection-help">Place at map center</button>
+              <div id="corner-adjust" class="corner-adjust" hidden>
+                <label for="keyboard-corner">Adjust corner</label>
+                <select id="keyboard-corner" name="keyboardCorner">
+                  <option value="0">Corner 1</option><option value="1">Corner 2</option>
+                  <option value="2">Corner 3</option><option value="3">Corner 4</option>
+                </select>
+                <div class="corner-nudge" role="group" aria-label="Move selected corner">
+                  <button class="nudge-button" data-nudge="north" type="button" aria-label="Move corner north">↑</button>
+                  <button class="nudge-button" data-nudge="west" type="button" aria-label="Move corner west">←</button>
+                  <button class="nudge-button" data-nudge="south" type="button" aria-label="Move corner south">↓</button>
+                  <button class="nudge-button" data-nudge="east" type="button" aria-label="Move corner east">→</button>
                 </div>
               </div>
-            </details>
+            </div>
           </div>
 
+          </div>
           <div class="land-selection-footer">
             <div class="area-summary">
               <p id="area-measure" class="area-measure" aria-live="polite">No area selected</p>
-              <p class="area-disclaimer">Your selection is approximate, not a verified parcel boundary.</p>
+              <p class="area-disclaimer">Approximate area · not a parcel boundary.</p>
             </div>
-            <button id="use-area" class="land-button land-button-dark land-confirm-button" type="button" disabled>Use this area <span aria-hidden="true">→</span></button>
+            <button id="use-area" class="land-button land-button-green land-confirm-button" type="button" disabled>Use this area <span aria-hidden="true">→</span></button>
           </div>
-
           <section id="area-confirmation" class="area-confirmation" aria-labelledby="confirmation-title" hidden>
             <div class="confirmation-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></div>
             <div class="confirmation-copy">

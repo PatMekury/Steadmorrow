@@ -21,11 +21,11 @@ For Maps, copy `.env.example` to `.env.local` and set `GOOGLE_MAPS_API_KEY` and 
 
 ### Start with the land
 
-- Live Google Maps loads when the section approaches the viewport. Search a property name or address with Find; results come from `Place.searchByText` after submission, rather than on each keystroke. Choose a result or explore the map directly.
-- Switch between Map and Satellite views. Search and view changes preserve an existing outline.
+- Live Google Maps loads when the section approaches the viewport. Address/place suggestions appear while typing. Use arrow keys and Enter, or click a suggestion; choosing one closes the dropdown and centers the map. Find property remains available for a submitted text search. Choose a result or explore the map directly.
+- Switch between Map and Satellite views. Scroll over the map to zoom without Ctrl; scroll outside it to move the page. Search and view changes preserve an existing outline.
 - **Polygon:** place four corners in perimeter order; the outline closes after the fourth. Its blue stroke, translucent blue fill, and four white circular handles with dark borders match the selected reference. Drag a corner to refine an irregular quadrilateral.
 - **Click to select:** click the land to create a four-corner starting area around that point, then move its corners to fit. This is a convenient starting shape, not an inferred parcel boundary.
-- Zoom in to land level before placing an area. Undo, Clear, and Fit selection controls support revision. Crossed edges, duplicate corners, and degenerate areas cannot be confirmed.
+- Zoom in to land level before placing an area. Larger Undo and Clear buttons sit in the right-hand panel below the selection modes. Fit selection remains on the map. Crossed edges, duplicate corners, and degenerate areas cannot be confirmed.
 - Keyboard controls place a corner or starting area at the map center. With the placement button focused, arrow keys move the center; Shift moves farther. A corner selector and directional controls adjust existing corners.
 - **Use this area** confirms the selection and shows its approximate area. **Adjust area** returns to the outline. User-drawn geometry, the user's associated search text, mode, and confirmation state are saved only in this browser; Google Places result content is not persisted. A storage failure is reported without preventing selection during the visit.
 - Loading, unavailable-map, search-failure, and empty-result states preserve the user's selection where possible.

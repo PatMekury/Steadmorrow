@@ -15,8 +15,8 @@ The dependency-free server in `scripts/serve.mjs` reads only these two settings 
 ## Runtime behavior
 
 - `land.js` requests the configuration and loads Google Maps when the land section approaches the viewport. The existing hero's fonts and video remain local.
-- Search runs only after form submission, using `Place.searchByText` and a small result list. Choosing a result centers the map; it does not replace the user's current outline.
-- Map/Satellite controls provide geographic context. Polygon mode closes after exactly four points. Click to select creates a four-corner starting shape around the clicked point. Neither mode infers a cadastral parcel.
+- Address suggestions use `AutocompleteSuggestion.fetchAutocompleteSuggestions` after two characters and a 200ms pause. An `AutocompleteSessionToken` spans typing; choosing a prediction calls `toPlace().fetchFields()` for its address/location and starts a fresh session next time. Suggestions and pending place lookups are invalidated when the query changes or the list is dismissed. Find property retains `Place.searchByText` as a fallback. Choosing a result centers the map and preserves the current outline.
+- Map uses `gestureHandling: greedy`: wheel scrolling over it zooms without Ctrl, while scrolling outside it moves the page. Map/Satellite controls provide geographic context. Polygon mode closes after exactly four points. Click to select creates a four-corner starting shape around the clicked point. Neither mode infers a cadastral parcel.
 - Draggable handles and keyboard controls refine the outline. Geometry validation blocks invalid confirmation. Undo, Clear, **Use this area**, and **Adjust area** support the selection flow.
 - Browser storage retains user-created geometry, mode, confirmation state, and the user's associated query text. Google Places result content is not persisted. This is local browser storage, not an account or cloud database.
 - Map/search errors preserve existing user work where possible and provide recovery guidance. Demo limits can make Maps or search unavailable until access resets.
@@ -39,3 +39,5 @@ Official sources:
 `npm run check` covers application/server syntax. `npm test` covers geometry and the development server; all 15 tests passed during the September 18 implementation check. Server tests use temporary fake credentials and cover missing/present configuration, environment precedence, GET/HEAD, no-store, static media ranges, and denied private/traversal paths.
 
 Live browser checks covered Maps loading, search, four-corner placement, dragging, crossed-outline rejection, undo, confirmation, and restoring the selection after reload. Keyboard selection and tablet/mobile layouts were also verified, with no horizontal overflow at the tested widths. Consult `docs/verification.md` for the current combined verification record.
+
+Autocomplete and place-details access were verified live with the saved demo key on September 18, 2026. This establishes current access, not a numeric quota guarantee. Implementation references: [Autocomplete Data API](https://developers.google.com/maps/documentation/javascript/place-autocomplete-data), [map gestures](https://developers.google.com/maps/documentation/javascript/interaction), and [attribution](https://developers.google.com/maps/documentation/javascript/policies).

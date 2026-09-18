@@ -10,6 +10,7 @@ let map, polygon, line, AdvancedMarkerElement, markers = [];
 let started = false, ready = false, searchSequence = 0, queryLabel = '', matchedLabel = '';
 let pendingQuery = '', pendingMatched = '', pendingLocation = null;
 let storageAvailable = true, dragging = false, keyboardActive = false;
+let suggestionTimer, autocompleteSession = null, activeSuggestion = -1, composing = false;
 
 function restore() {
   try {
@@ -35,7 +36,7 @@ function persist() {
     storageAvailable = true;
   } catch { storageAvailable = false; }
   $('save-status').textContent = storageAvailable
-    ? 'Saved in this browser. You can return and adjust it.'
+    ? 'Saved in this browser.'
     : 'Kept for this visit. Browser storage is unavailable; refreshing will lose this selection.';
 }
 
@@ -58,12 +59,15 @@ function render() {
   $('experience').dataset.hasSelection = String(points.length > 0);
   document.querySelector('.land-map-heading').hidden = !points.length && !pendingMatched;
   $('area-measure').hidden = !points.length;
+  document.querySelector('.land-selection-footer').hidden = !points.length || confirmed;
+  document.querySelector('.selection-actions').hidden = false;
+  $('corner-progress').hidden = !points.length || confirmed;
   $('place-label').textContent = points.length
     ? (matchedLabel || (queryLabel ? `Your selection · ${queryLabel}` : 'Your selected exploration area'))
     : (pendingMatched || 'Find a property or explore the map');
   $('mode-polygon').setAttribute('aria-pressed', String(mode === 'polygon'));
   $('mode-click').setAttribute('aria-pressed', String(mode === 'click'));
-  $('corner-progress').textContent = confirmed ? '4 corners · area selected' : points.length === 4 ? '4 corners · drag to refine' : `${points.length} of 4 corners`;
+  $('corner-progress').textContent = confirmed ? 'Area selected' : points.length === 4 ? 'Drag corners to adjust' : `${points.length} of 4 corners`;
   $('selection-help').textContent = confirmed ? 'Your selected area is ready to revisit.'
     : !ready ? 'Find the property, then choose how to select the land.'
     : !closeEnough && points.length < 4 ? 'Search for a property or zoom in to see the land clearly.'
@@ -84,7 +88,7 @@ function render() {
   for (const option of $('keyboard-corner').options) option.disabled = Number(option.value) >= points.length;
   if (Number($('keyboard-corner').value) >= points.length) $('keyboard-corner').value = '0';
   $('area-confirmation').hidden = !confirmed;
-  if (confirmed) $('confirmation-detail').textContent = `${matchedLabel || queryLabel || 'Your selected location'} · ${areaLabel()}. This is the area you marked for exploration.`;
+  if (confirmed) $('confirmation-detail').textContent = areaLabel();
   $('map-crosshair').hidden = !keyboardActive || !ready || confirmed || points.length === 4;
   document.querySelector('.map-stage').classList.toggle('is-selecting', ready && !confirmed && points.length < 4 && closeEnough);
   if (map) map.setOptions({ draggableCursor: !confirmed && points.length < 4 && closeEnough ? 'crosshair' : null });
@@ -132,7 +136,7 @@ function syncMarkers() {
 function selected(point) {
   if (!ready || confirmed || points.length >= 4) return;
   if (map.getZoom() < 16) {
-    $('selection-help').textContent = 'Zoom in a little more before selecting the land.';
+    $('search-status').textContent = 'Zoom in to select an area.';
     return;
   }
   const center = literal(point);
@@ -178,6 +182,7 @@ function changeMode(nextMode) {
 
 function showMapFailure(message) {
   ready = false;
+  dismissSearch({ endSession: true });
   $('map-message').hidden = false;
   $('map-message').classList.add('is-error');
   $('map-message-text').textContent = message;
@@ -218,15 +223,19 @@ async function initialize() {
       mapId: 'DEMO_MAP_ID', mapTypeId: 'roadmap', tilt: 0,
       streetViewControl: false, fullscreenControl: false, mapTypeControl: false,
       rotateControl: false, cameraControl: false, zoomControl: true, scaleControl: true,
-      clickableIcons: false, gestureHandling: 'cooperative', minZoom: 3,
+      clickableIcons: false, gestureHandling: 'greedy', minZoom: 3,
     });
     polygon = new Polygon({ map, paths: points, strokeColor: '#2b61ff', strokeWeight: 2, strokeOpacity: 1, fillColor: '#2b61ff', fillOpacity: .24, editable: false, clickable: false });
     line = new Polyline({ map, path: points, strokeColor: '#2b61ff', strokeWeight: 2, clickable: false });
     ready = true;
     $('map-message').hidden = true;
     $('find-property').disabled = false;
+    if (document.activeElement === $('property-query')) queueSuggestions();
     map.addListener('click', event => { if (event.latLng) selected(event.latLng); });
-    map.addListener('zoom_changed', render);
+    map.addListener('zoom_changed', () => {
+      if ($('search-status').textContent === 'Zoom in to select an area.' && map.getZoom() >= 16) $('search-status').textContent = '';
+      render();
+    });
     if (points.length > 1) fitSelection();
     render();
   } catch (error) {
@@ -234,60 +243,177 @@ async function initialize() {
   }
 }
 
-async function search(event) {
-  event.preventDefault();
-  const query = $('property-query').value.trim();
-  if (!query || !ready) return;
-  const sequence = ++searchSequence;
-  $('find-property').disabled = true;
-  $('search-status').textContent = 'Finding matching places…';
+function dismissSearch({ endSession = false } = {}) {
+  clearTimeout(suggestionTimer);
+  ++searchSequence;
+  activeSuggestion = -1;
+  if (endSession) autocompleteSession = null;
   $('search-results').hidden = true;
+  $('result-list').replaceChildren();
+  $('property-query').setAttribute('aria-expanded', 'false');
+  $('property-query').removeAttribute('aria-activedescendant');
+  $('search-status').textContent = '';
+  $('result-announcement').textContent = '';
+  $('find-property').disabled = !ready;
+}
+
+function highlightSuggestion(index) {
+  const options = [...$('result-list').children];
+  if (!options.length) return;
+  activeSuggestion = (index + options.length) % options.length;
+  options.forEach((option, i) => option.setAttribute('aria-selected', String(i === activeSuggestion)));
+  const active = options[activeSuggestion];
+  $('property-query').setAttribute('aria-activedescendant', active.id);
+  active.scrollIntoView({ block: 'nearest' });
+}
+
+async function choosePlace(match, query, requestSequence) {
+  if (requestSequence !== searchSequence || !ready) return;
+  // Close immediately; a later query also invalidates an in-flight place lookup.
+  $('property-query').focus({ preventScroll: true });
+  dismissSearch({ endSession: true });
+  const sequence = searchSequence;
+  $('find-property').disabled = true;
+  $('search-status').textContent = 'Finding location…';
   try {
-    const { Place } = await google.maps.importLibrary('places');
-    const { places } = await Place.searchByText({ textQuery: query, fields: ['displayName', 'formattedAddress', 'location', 'viewport'], maxResultCount: 5 });
-    if (sequence !== searchSequence) return;
-    const matches = places.filter(place => place.location);
-    $('result-list').replaceChildren();
-    $('search-status').textContent = matches.length ? 'Choose the place you have in mind.' : 'No matches found. Try a fuller address, or find the location on the map.';
-    $('search-results').hidden = !matches.length;
-    for (const place of matches) {
-      const button = document.createElement('button');
-      button.type = 'button'; button.className = 'result-option';
-      const name = document.createElement('span'); name.className = 'result-name'; name.textContent = place.displayName || place.formattedAddress;
-      const address = document.createElement('span'); address.className = 'result-address'; address.textContent = place.formattedAddress || '';
-      button.append(name, address);
-      button.addEventListener('click', () => {
-        pendingMatched = place.formattedAddress || place.displayName || query;
-        pendingQuery = query;
-        pendingLocation = literal(place.location);
-        $('place-label').textContent = pendingMatched;
-        $('search-results').hidden = true;
-        $('search-status').textContent = 'Location found. The outline remains yours to choose.';
-        map.setCenter(place.location);
-        map.setZoom(18);
-        // Searching never discards a previously drawn area.
-        if (points.length) $('search-status').textContent = 'Location found. Your existing outline is kept; use Clear to select a new area.';
-        $('mode-' + mode).focus({ preventScroll: true });
-        render(); persist();
-      });
-      $('result-list').append(button);
-    }
-    if (matches.length) $('result-list').firstElementChild.focus({ preventScroll: true });
+    const place = match.prediction ? match.prediction.toPlace() : match.place;
+    if (match.prediction) await place.fetchFields({ fields: ['formattedAddress', 'location'] });
+    if (sequence !== searchSequence || !ready) return;
+    if (!place.location) throw new Error('missing-location');
+    pendingMatched = place.formattedAddress || match.name || query;
+    pendingQuery = query;
+    pendingLocation = literal(place.location);
+    $('property-query').value = pendingMatched;
+    if (!points.length) queryLabel = query;
+    map.setCenter(place.location);
+    map.setZoom(18);
+    $('mode-' + mode).focus({ preventScroll: true });
+    $('search-status').textContent = points.length ? 'Existing area kept. Clear it to start another.' : '';
+    render(); persist();
   } catch {
-    if (sequence === searchSequence) $('search-status').textContent = 'Search is unavailable right now. Try again later, or find the location directly on the map. The demo may have reached its daily limit.';
+    if (sequence === searchSequence) $('search-status').textContent = 'Couldn’t find that location. Try again.';
   } finally {
     if (sequence === searchSequence) $('find-property').disabled = !ready;
   }
 }
 
+function showSuggestions(matches, query, sequence) {
+  if (sequence !== searchSequence || !ready) return;
+  activeSuggestion = -1;
+  $('result-list').replaceChildren();
+  $('property-query').removeAttribute('aria-activedescendant');
+  for (const [index, match] of matches.entries()) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'result-option';
+    button.id = `place-option-${sequence}-${index}`;
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', 'false');
+    button.tabIndex = -1;
+    const name = document.createElement('span');
+    name.className = 'result-name'; name.textContent = match.name;
+    const address = document.createElement('span');
+    address.className = 'result-address'; address.textContent = match.address;
+    button.append(name, address);
+    // Keep the typing caret in the field until the suggestion is chosen.
+    button.addEventListener('pointerdown', event => event.preventDefault());
+    button.addEventListener('click', () => { void choosePlace(match, query, sequence); });
+    $('result-list').append(button);
+  }
+  $('search-results').hidden = !matches.length;
+  $('property-query').setAttribute('aria-expanded', String(matches.length > 0));
+  $('result-announcement').textContent = matches.length ? `${matches.length} address suggestions available.` : 'No matching suggestions.';
+}
+
+async function suggest(query, sequence) {
+  try {
+    const { AutocompleteSuggestion, AutocompleteSessionToken } = await google.maps.importLibrary('places');
+    if (sequence !== searchSequence || !ready) return;
+    autocompleteSession ||= new AutocompleteSessionToken();
+    const request = { input: query, sessionToken: autocompleteSession };
+    if (map.getZoom() >= 10 && map.getBounds()) request.locationBias = map.getBounds();
+    const { suggestions } = await AutocompleteSuggestion.fetchAutocompleteSuggestions(request);
+    if (sequence !== searchSequence) return;
+    const matches = suggestions.filter(suggestion => suggestion.placePrediction).slice(0, 5).map(({ placePrediction }) => ({
+      prediction: placePrediction,
+      name: placePrediction.mainText?.toString() || placePrediction.text.toString(),
+      address: placePrediction.secondaryText?.toString() || '',
+    }));
+    showSuggestions(matches, query, sequence);
+  } catch {
+    if (sequence === searchSequence) $('search-status').textContent = 'Suggestions unavailable. Try Find property.';
+  }
+}
+
+function queueSuggestions() {
+  const query = $('property-query').value.trim();
+  if (!ready || query.length < 2 || composing) return;
+  const sequence = searchSequence;
+  suggestionTimer = setTimeout(() => { void suggest(query, sequence); }, 200);
+}
+
+async function search(event) {
+  event.preventDefault();
+  if (composing) return;
+  const query = $('property-query').value.trim();
+  if (!query || !ready) return;
+  const option = $('result-list').children[activeSuggestion];
+  if (option && !$('search-results').hidden) { option.click(); return; }
+  dismissSearch({ endSession: true });
+  const sequence = searchSequence;
+  $('find-property').disabled = true;
+  $('search-status').textContent = 'Finding matching places…';
+  try {
+    const { Place } = await google.maps.importLibrary('places');
+    if (sequence !== searchSequence || !ready) return;
+    const { places } = await Place.searchByText({ textQuery: query, fields: ['displayName', 'formattedAddress', 'location'], maxResultCount: 5 });
+    if (sequence !== searchSequence) return;
+    const matches = places.filter(place => place.location).map(place => ({ place, name: place.displayName || place.formattedAddress, address: place.formattedAddress || '' }));
+    $('property-query').focus({ preventScroll: true });
+    showSuggestions(matches, query, sequence);
+    $('search-status').textContent = matches.length ? '' : 'No matches found. Try a fuller address.';
+  } catch {
+    if (sequence === searchSequence) $('search-status').textContent = 'Search is unavailable. Try again later.';
+  } finally {
+    if (sequence === searchSequence) $('find-property').disabled = !ready;
+  }
+}
+
+function queryChanged(event) {
+  dismissSearch();
+  const query = $('property-query').value.trim();
+  if (!query) autocompleteSession = null;
+  if (query !== pendingQuery) { pendingQuery = ''; pendingMatched = ''; pendingLocation = null; }
+  if (!points.length) queryLabel = query;
+  render(); persist();
+  if (!event?.isComposing && !composing) queueSuggestions();
+}
+
 $('property-search').addEventListener('submit', search);
-$('property-query').addEventListener('input', () => {
-  if (!points.length) {
-    queryLabel = $('property-query').value.trim();
-    if (!queryLabel) { pendingQuery = ''; pendingMatched = ''; pendingLocation = null; }
-    render(); persist();
+$('property-query').addEventListener('input', queryChanged);
+$('property-query').addEventListener('compositionstart', () => { composing = true; dismissSearch(); });
+$('property-query').addEventListener('compositionend', () => { composing = false; queryChanged(); });
+$('property-query').addEventListener('keydown', event => {
+  if (event.isComposing || composing) return;
+  const count = $('result-list').children.length;
+  if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && count) {
+    event.preventDefault();
+    highlightSuggestion(activeSuggestion < 0 ? (event.key === 'ArrowDown' ? 0 : count - 1) : activeSuggestion + (event.key === 'ArrowDown' ? 1 : -1));
+  } else if (event.key === 'Enter' && activeSuggestion >= 0 && count) {
+    event.preventDefault();
+    $('result-list').children[activeSuggestion].click();
+  } else if (event.key === 'Escape' || event.key === 'Tab') {
+    dismissSearch({ endSession: true });
+    if (event.key === 'Escape') event.preventDefault();
   }
 });
+document.addEventListener('pointerdown', event => {
+  if (!document.querySelector('.property-finder').contains(event.target)) dismissSearch({ endSession: true });
+});
+document.querySelector('.property-finder').addEventListener('focusout', event => {
+  if (!event.currentTarget.contains(event.relatedTarget)) dismissSearch({ endSession: true });
+});
+
 $('mode-polygon').addEventListener('click', () => changeMode('polygon'));
 $('mode-click').addEventListener('click', () => changeMode('click'));
 $('clear-area').addEventListener('click', () => { remember(); points = []; confirmed = false; render(); persist(); });
@@ -316,7 +442,8 @@ $('use-area').addEventListener('click', () => {
   $('area-confirmation').scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
 });
 $('edit-area').addEventListener('click', () => { confirmed = false; render(); persist(); fitSelection(); $('mode-' + mode).focus({ preventScroll: true }); });
-$('keyboard-help').addEventListener('toggle', () => { keyboardActive = $('keyboard-help').open; render(); });
+$('keyboard-place').addEventListener('focus', () => { keyboardActive = true; render(); });
+$('keyboard-place').addEventListener('blur', () => { keyboardActive = false; render(); });
 $('keyboard-place').addEventListener('click', () => { if (map) selected(map.getCenter()); });
 $('keyboard-place').addEventListener('keydown', event => {
   if (!ready) return;
