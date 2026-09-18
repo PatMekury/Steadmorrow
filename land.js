@@ -5,6 +5,9 @@ const storageKey = 'steadmorrow.land.v1';
 const initialView = { lat: 39.5, lng: -98.35 };
 const copy = value => value.map(point => ({ ...point }));
 const literal = value => ({ lat: typeof value.lat === 'function' ? value.lat() : value.lat, lng: typeof value.lng === 'function' ? value.lng() : value.lng });
+const priorityChoices = ['Retain ownership', 'Keep open space', 'Limit the initial commitment'];
+let priorities = { purpose: '', preserve: '', exploring: false, choices: [], saved: false };
+let mapView;
 let points = [], undoStack = [], mode = 'polygon', confirmed = false;
 let map, polygon, line, AdvancedMarkerElement, markers = [];
 let started = false, ready = false, searchSequence = 0, queryLabel = '', matchedLabel = '';
@@ -21,6 +24,14 @@ function restore() {
     mode = saved.mode === 'click' ? 'click' : 'polygon';
     confirmed = saved.confirmed === true && validatePolygon(points).valid;
     queryLabel = typeof saved.query === 'string' ? saved.query.slice(0, 240) : '';
+    const input = saved.priorities || {};
+    priorities = {
+      purpose: typeof input.purpose === 'string' ? input.purpose.slice(0, 600) : '',
+      preserve: typeof input.preserve === 'string' ? input.preserve.slice(0, 600) : '',
+      exploring: input.exploring === true,
+      choices: priorityChoices.filter(choice => Array.isArray(input.choices) && input.choices.includes(choice)),
+      saved: input.saved === true,
+    };
     pendingQuery = queryLabel;
     undoStack = mode === 'click' ? (points.length ? [{ points: [], mode, queryLabel, matchedLabel: '' }] : [])
       : points.map((_, index) => ({ points: copy(points.slice(0, index)), mode, queryLabel, matchedLabel: '' }));
@@ -32,12 +43,12 @@ function restore() {
 function persist() {
   try {
     // Save only user input and user-drawn geometry, not Google Places results.
-    localStorage.setItem(storageKey, JSON.stringify({ version: 1, points, mode, confirmed, query: queryLabel }));
+    localStorage.setItem(storageKey, JSON.stringify({ version: 1, points, mode, confirmed, query: queryLabel, priorities }));
     storageAvailable = true;
   } catch { storageAvailable = false; }
   $('save-status').textContent = storageAvailable
     ? 'Saved in this browser.'
-    : 'Kept for this visit. Browser storage is unavailable; refreshing will lose this selection.';
+    : 'Kept for this visit. Browser storage is unavailable; refreshing will lose your work.';
 }
 
 function remember() {
@@ -87,8 +98,12 @@ function render() {
   $('corner-adjust').hidden = !points.length || confirmed;
   for (const option of $('keyboard-corner').options) option.disabled = Number(option.value) >= points.length;
   if (Number($('keyboard-corner').value) >= points.length) $('keyboard-corner').value = '0';
-  $('area-confirmation').hidden = !confirmed;
-  if (confirmed) $('confirmation-detail').textContent = areaLabel();
+  document.querySelector('.land-workbench').hidden = confirmed;
+  $('priorities-step').hidden = !confirmed;
+  $('back-to-map').hidden = !confirmed;
+  $('experience-title').textContent = confirmed ? 'What matters here?' : 'Start with the land.';
+  $('priority-area').textContent = `Selected area · ${areaLabel()}`;
+  renderPriorities();
   $('map-crosshair').hidden = !keyboardActive || !ready || confirmed || points.length === 4;
   document.querySelector('.map-stage').classList.toggle('is-selecting', ready && !confirmed && points.length < 4 && closeEnough);
   if (map) map.setOptions({ draggableCursor: !confirmed && points.length < 4 && closeEnough ? 'crosshair' : null });
@@ -434,14 +449,68 @@ for (const [id, type] of [['view-map', 'roadmap'], ['view-satellite', 'hybrid']]
   });
 }
 $('map-retry').addEventListener('click', () => { persist(); location.reload(); });
+function focusStep() {
+  $('experience-title').focus({ preventScroll: true });
+  $('experience').scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+}
+
+function renderPriorities() {
+  $('priorities-form').hidden = priorities.saved;
+  $('priorities-review').hidden = !priorities.saved;
+  const lines = [
+    [priorities.purpose.trim(), priorities.exploring ? 'We’re still exploring' : ''].filter(Boolean).join(' · '),
+    priorities.preserve.trim(),
+    priorities.choices.join(' · '),
+  ].filter(Boolean);
+  $('priorities-summary').replaceChildren(...lines.map(text => {
+    const item = document.createElement('li');
+    item.textContent = text;
+    return item;
+  }));
+}
+
+function readPriorities() {
+  priorities.purpose = $('priority-purpose').value;
+  priorities.preserve = $('priority-preserve').value;
+  priorities.exploring = $('priority-exploring').checked;
+  priorities.choices = [...document.querySelectorAll('[name="priority-choice"]:checked')].map(input => input.value);
+  priorities.saved = false;
+  persist();
+}
+
+$('priorities-form').addEventListener('input', readPriorities);
+$('priorities-form').addEventListener('submit', event => {
+  event.preventDefault();
+  readPriorities();
+  if (!priorities.purpose.trim() && !priorities.preserve.trim() && !priorities.choices.length) {
+    priorities.exploring = true;
+    $('priority-exploring').checked = true;
+  }
+  priorities.saved = true;
+  renderPriorities(); persist();
+  $('priorities-review-title').focus({ preventScroll: true });
+});
+$('edit-priorities').addEventListener('click', () => {
+  priorities.saved = false;
+  renderPriorities(); persist();
+  $('priority-purpose').focus({ preventScroll: true });
+});
 $('use-area').addEventListener('click', () => {
   if (!ready || !validatePolygon(points).valid) return;
+  dismissSearch({ endSession: true });
+  mapView = { center: map.getCenter(), zoom: map.getZoom() };
   confirmed = true;
-  render(); persist();
-  $('confirmation-title').focus({ preventScroll: true });
-  $('area-confirmation').scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+  render(); persist(); focusStep();
 });
-$('edit-area').addEventListener('click', () => { confirmed = false; render(); persist(); fitSelection(); $('mode-' + mode).focus({ preventScroll: true }); });
+$('back-to-map').addEventListener('click', () => {
+  confirmed = false;
+  render(); persist(); focusStep();
+  if (!started) void initialize();
+  else if (map && mapView) requestAnimationFrame(() => {
+    map.setCenter(mapView.center);
+    map.setZoom(mapView.zoom);
+  });
+});
 $('keyboard-place').addEventListener('focus', () => { keyboardActive = true; render(); });
 $('keyboard-place').addEventListener('blur', () => { keyboardActive = false; render(); });
 $('keyboard-place').addEventListener('click', () => { if (map) selected(map.getCenter()); });
@@ -472,9 +541,13 @@ document.querySelectorAll('[data-nudge]').forEach(button => button.addEventListe
 }));
 
 restore();
+$('priority-purpose').value = priorities.purpose;
+$('priority-preserve').value = priorities.preserve;
+$('priority-exploring').checked = priorities.exploring;
+document.querySelectorAll('[name="priority-choice"]').forEach(input => { input.checked = priorities.choices.includes(input.value); });
 render();
 persist();
 const observer = new IntersectionObserver(entries => {
-  if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); initialize(); }
+  if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); if (!confirmed) initialize(); }
 }, { rootMargin: '250px' });
 observer.observe($('experience'));

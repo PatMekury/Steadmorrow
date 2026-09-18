@@ -29,7 +29,7 @@ Review fixes: shared minimum stage height on short displays, correct pause state
 - Automated checks: all application/server JavaScript syntax checks pass; all 15 geometry/server tests pass. Tests cover both windings, concavity, dateline geometry, duplicates, crossings/touching, degenerate points, area/centroid calculations, no mutation, Maps config isolation, HEAD/range requests, and blocked private/traversal paths.
 - Local draft storage contains user input and user-selected points only. Google Places result objects and addresses are not persisted. History retains selection labels with geometry, so Undo does not attach a later search label to an earlier outline.
 
-Limits: this stage selects an approximate exploration area. No recorded parcel, ownership, vacancy, zoning, feasibility research, priorities, or Gloo agents are implemented. Confirmation does not trigger research or a cloud save. Network/quota failures use visible recovery states; a real demo quota exhaustion was not forced during testing. Storage-denied behavior is implemented but not exercised in a browser with storage disabled.
+Limits: this stage selects an approximate exploration area. No recorded parcel, ownership, vacancy, zoning, feasibility research or Gloo agents are implemented. Confirmation does not trigger research or a cloud save. Network/quota failures use visible recovery states; a real demo quota exhaustion was not forced during testing. Storage-denied behavior is implemented but not exercised in a browser with storage disabled.
 
 ## Style-guide correction — September 18, 2026
 
@@ -66,3 +66,15 @@ The local preview server had stopped before this pass; it was restarted at http:
 - Actual desktop and 390x844 mobile renders were reviewed, including the suggestion dropdown and larger controls. The dropdown has its own scrollable list and visible Google Maps attribution. The temporary mobile viewport was reset.
 - Test geometry was cleared and the original Houston, TX query restored before reloading the preview.
 - npm run check and git diff --check passed. Geometry and server code were unchanged; the previous 15-test result remains applicable. No billing or key settings changed.
+
+
+## Sequential starting priorities — September 18, 2026
+
+Supersedes the earlier Area selected / Adjust area confirmation endpoint.
+
+- Use this area hides the map/finder workbench and opens What matters here? in the same section. No extra column is created. The back arrow remains available during editing and summary review.
+- Live browser checks at 1440×1000 and 390×844: neutral paper fields, green selected suggestions/actions, Outfit typography, no horizontal overflow.
+- Typed a temporary purpose and selected Keep open space; Back to map retained all four marker coordinates and the measured 10,133 m² outline. Advancing again retained both answers.
+- Saved priorities and reloaded: the summary and back arrow restored. Maps did not initialize while the priorities step was restored; Back to map then loaded the saved four-corner outline successfully.
+- Empty optional answers saved as We're still exploring. The summary received focus after saving; editing restored the fields. Temporary test input/geometry was cleared and viewport overrides reset.
+- Syntax check and all 15 existing geometry/server tests passed. Research/Gloo integration and cloud persistence remain unimplemented. Storage-denied recovery remains untested in a browser with storage disabled.

@@ -29,11 +29,11 @@ Keep both user-requested selection modes:
 - **Polygon:** exactly four points placed in perimeter order, closing after point four. Support irregular quadrilaterals, with a blue outline, translucent blue fill, and four white circular handles with dark borders.
 - **Click to select:** a click creates a four-corner starting area around the selected point. The user adjusts its corners; it does not detect or verify parcel boundaries.
 
-Corners remain draggable while editing. Preserve Undo, Clear, selection framing, keyboard placement at the map center and directional corner adjustment. Crossed edges, duplicate corners, and zero/degenerate areas must prevent **Use this area**. Confirmation retains an **Adjust area** path. Search, view changes, and recoverable errors must not silently discard the current outline.
+Corners remain draggable while editing. Preserve Undo, Clear, selection framing, keyboard placement at the map center and directional corner adjustment. Crossed edges, duplicate corners, and zero/degenerate areas must prevent **Use this area**. Use this area opens the next priorities screen; its **Back to map** arrow reopens editing without losing the outline or answers. Search, view changes, and recoverable errors must not silently discard the current outline.
 
-Persist only user-entered query text, user-drawn geometry, selection mode, and confirmation state in browser storage. Do not persist Google Places result content. If storage is unavailable, explain that the selection lasts only for the visit. The approximate area and outline do not establish parcel boundaries, ownership, permission, buildability, or housing capacity.
+Persist only user-entered query text, user-drawn geometry, selection mode, confirmation state, and user-entered starting priorities in browser storage. Do not persist Google Places result content. If storage is unavailable, explain that the selection lasts only for the visit. The approximate area and outline do not establish parcel boundaries, ownership, permission, buildability, or housing capacity.
 
-Confirmation is the current endpoint. Starting priorities, research, Gloo agents, accounts, and later decision/export stages are not implemented. Do not present concept documents or this selected area as completed research.
+Starting priorities are implemented as the next screen replacing the map workbench, never another column. The two optional prompts, selectable suggestions, local autosave, and editable Starting priorities summary are implemented. Back to map remains available throughout. Research, Gloo agents, accounts, and later decision/export stages are not implemented. Do not present concept documents or this selected area as completed research.
 
 ### Maps configuration
 

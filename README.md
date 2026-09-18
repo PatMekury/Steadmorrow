@@ -27,10 +27,10 @@ For Maps, copy `.env.example` to `.env.local` and set `GOOGLE_MAPS_API_KEY` and 
 - **Click to select:** click the land to create a four-corner starting area around that point, then move its corners to fit. This is a convenient starting shape, not an inferred parcel boundary.
 - Zoom in to land level before placing an area. Larger Undo and Clear buttons sit in the right-hand panel below the selection modes. Fit selection remains on the map. Crossed edges, duplicate corners, and degenerate areas cannot be confirmed.
 - Keyboard controls place a corner or starting area at the map center. With the placement button focused, arrow keys move the center; Shift moves farther. A corner selector and directional controls adjust existing corners.
-- **Use this area** confirms the selection and shows its approximate area. **Adjust area** returns to the outline. User-drawn geometry, the user's associated search text, mode, and confirmation state are saved only in this browser; Google Places result content is not persisted. A storage failure is reported without preventing selection during the visit.
+- **Use this area** opens **What matters here?** in the same workspace. **Back to map** returns to the outline and preserves the answers. Two optional prompts and suggested priorities can be saved as an editable **Your starting view** summary. User-drawn geometry, the user's associated search text, mode, confirmation state, and starting priorities are saved only in this browser; Google Places result content is not persisted. A storage failure is reported without preventing selection during the visit.
 - Loading, unavailable-map, search-failure, and empty-result states preserve the user's selection where possible.
 
-The selected outline is an exploration area. It does not establish parcel boundaries, ownership, permission, buildability, or housing capacity. Confirmation completes this stage; priorities, research, Gloo agents, sign-in, and subsequent decision/export flows are not implemented. No Request a demo action exists.
+The selected outline is an exploration area. It does not establish parcel boundaries, ownership, permission, buildability, or housing capacity. The priorities summary completes the current flow; research, Gloo agents, sign-in, and subsequent decision/export flows are not implemented. No Request a demo action exists.
 
 ## Required design reference
 

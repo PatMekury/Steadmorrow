@@ -19,3 +19,8 @@ The map-left/finder-right arrangement, compact scale, light selector, and green 
 The guide normalizes green variants for the product; field focus retains source #56CC7E. Controls expose selection, retain keyboard operation, and respect reduced motion. Later research stages remain unimplemented.
 
 Latest interaction refinement: Undo/Clear sit under the selection modes in the right column, using 56px-high paper buttons with 16px labels. A compact attributed suggestion list opens directly under the address field while typing; it overlays surrounding controls and dismisses after a choice. Existing guide colors, fonts, field size, map corners, and blue selection are preserved.
+
+
+## Sequential priorities step
+
+The user requested the next step replace the map workspace, with a back arrow preserving the selection. What matters here? therefore occupies a single 840px-wide content area within the existing 1280px section; the map and finder are hidden together. This is a product adaptation. It retains Outfit headings, white surfaces, paper fields with 12px corners and green focus, green selected pills, and concise optional prompts from the solution foundation. Desktop and mobile browser renders were inspected.

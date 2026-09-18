@@ -101,14 +101,6 @@
 .land-selection-footer { grid-column: 2; grid-row: 3; display: flex; align-items: stretch; flex-direction: column; gap: 20px; }
 .area-measure { margin: 0; font-size: 24px; line-height: 30px; font-weight: 500; letter-spacing: -.025em; }
 .area-disclaimer { margin: 8px 0 0; color: var(--land-muted); font-size: 14px; line-height: 20px; }
-.area-confirmation { grid-column: 2; grid-row: 4; display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; padding: 24px; border: 0; border-radius: 24px; background: var(--land-paper); }
-.confirmation-icon { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--land-green); color: var(--land-ink); }
-.confirmation-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.confirmation-copy { flex: 1; min-width: 0; }
-.confirmation-copy h3 { margin: 0 0 8px; font-size: 24px; line-height: 30px; font-weight: 600; letter-spacing: -.03em; }
-.confirmation-copy p { margin: 0; font-size: 14px; line-height: 20px; color: var(--land-muted); }
-.confirmation-copy .save-status { margin-top: 8px; }
-.area-confirmation .land-button { width: 100%; }
 .land-experience :is(button, select):focus-visible { outline: 2px solid #166c3d; outline-offset: 3px; }
 .land-experience :is(h2,h3):focus { outline: none; }
 @media (max-width: 1100px) {
@@ -125,7 +117,6 @@
   .land-toolbar { grid-column: 1; grid-row: 2; }
   .land-map-column { grid-column: 1; grid-row: 3; }
   .land-selection-footer { grid-column: 1; grid-row: 4; }
-  .area-confirmation { grid-column: 1; grid-row: 5; }
   .map-stage { height: 400px; }
   .map-view-tools { inset: 12px 12px auto; gap: 8px; }
   .map-view-button { padding-inline: 12px; }
@@ -136,4 +127,41 @@
 @media (forced-colors: active) {
   .land-tool[aria-pressed="true"], .map-view-button[aria-pressed="true"] { border: 2px solid Highlight; }
   .land-button, .map-view-switch, .map-fit-button, .corner-handle { border: 1px solid ButtonText; }
+}
+
+/* A sequential step occupies the map workspace, never an extra column. */
+.step-back { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; margin: -8px 0 16px; padding: 8px 0; border: 0; background: transparent; color: var(--land-ink); font: 500 16px/24px Outfit, sans-serif; cursor: pointer; }
+.step-back span { font-size: 24px; }
+.step-back:hover { color: #166c3d; }
+.priorities-step { max-width: 840px; }
+.priority-area { margin: -16px 0 32px; color: var(--land-muted); font-size: 14px; line-height: 20px; }
+.priorities-form { display: flex; flex-direction: column; align-items: flex-start; gap: 28px; }
+.priority-field { width: 100%; }
+.priority-field > label:first-child { display: block; margin-bottom: 12px; font-size: 20px; line-height: 28px; font-weight: 500; }
+.priority-field > label:first-child > span { margin-left: 8px; font-size: 14px; font-weight: 400; color: var(--land-muted); white-space: nowrap; }
+.priority-field textarea { display: block; width: 100%; min-height: 104px; padding: 18px 20px; border: 2px solid transparent; border-radius: 12px; background: var(--land-paper); color: var(--land-ink); resize: vertical; font: 400 16px/24px Outfit, sans-serif; }
+.priority-field textarea::placeholder { color: var(--land-muted); }
+.priority-field textarea:focus { outline: none; border-color: var(--land-green); }
+.priority-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.priority-chip { position: relative; display: inline-flex; cursor: pointer; }
+.priority-field > .priority-chip { margin-top: 12px; }
+.priority-chip input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.priority-chip span { display: inline-flex; align-items: center; min-height: 44px; padding: 10px 16px; border-radius: 100px; background: var(--land-paper); color: var(--land-ink); font-size: 14px; line-height: 20px; }
+.priority-chip input:checked + span { background: var(--land-green); }
+.priority-chip input:checked + span::before { content: '✓'; margin-right: 8px; }
+.priority-chip input:focus-visible + span { outline: 2px solid #166c3d; outline-offset: 3px; }
+.priority-chip:hover span { box-shadow: inset 0 0 0 1px var(--land-green); }
+.priorities-step .save-status { margin: 20px 0 0; color: var(--land-muted); font-size: 14px; line-height: 20px; }
+.priority-eyebrow { margin: 0 0 8px; color: var(--land-muted); font-size: 14px; line-height: 20px; }
+.priorities-review h3 { margin: 0; font-size: 28px; line-height: 34px; font-weight: 600; letter-spacing: -.025em; }
+.priorities-review ul { display: grid; gap: 16px; margin: 24px 0 28px; padding: 0; list-style: none; }
+.priorities-review li { padding-left: 16px; border-left: 3px solid var(--land-green); font-size: 20px; line-height: 28px; overflow-wrap: anywhere; white-space: pre-wrap; }
+@media (max-width: 767px) {
+  .priority-area { margin-top: -8px; margin-bottom: 24px; }
+  .priority-field > label:first-child { font-size: 18px; line-height: 26px; }
+  .priorities-form > .land-button { width: 100%; }
+}
+@media (forced-colors: active) {
+  .priority-field textarea, .priority-chip span { border: 1px solid ButtonText; }
+  .priority-chip input:checked + span { border: 2px solid Highlight; }
 }
