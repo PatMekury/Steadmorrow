@@ -1,0 +1,15 @@
+{
+  "name": "steadmorrow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Steadmorrow opening section and city animation",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "start": "node scripts/serve.mjs",
+    "check": "node --check app.js && node --check scripts/serve.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
