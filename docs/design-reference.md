@@ -24,3 +24,8 @@ Latest interaction refinement: Undo/Clear sit under the selection modes in the r
 ## Sequential priorities step
 
 The user requested the next step replace the map workspace, with a back arrow preserving the selection. What matters here? therefore occupies a single 840px-wide content area within the existing 1280px section; the map and finder are hidden together. This is a product adaptation. It retains Outfit headings, white surfaces, paper fields with 12px corners and green focus, green selected pills, and concise optional prompts from the solution foundation. Desktop and mobile browser renders were inspected.
+
+
+## First-look screen
+
+Gloo guidance replaces the priorities workspace with a single 840px content column. It reuses the compact Outfit heading, white surfaces, green actions and existing back arrow. Supporting explanations sit behind native disclosure controls; the missing property-record evidence remains visible. Desktop and mobile live renders were reviewed. This layout is a Steadmorrow adaptation, not an observed reference-video flow.

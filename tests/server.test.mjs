@@ -54,11 +54,12 @@ test('missing configuration is explicit, is not cached, and HEAD has no body', a
 });
 
 test('local Maps settings load, unrelated environment values remain private, and process settings take precedence', async () => {
-  const localConfig = '# Test values, never a real credential\r\nGOOGLE_MAPS_API_KEY="fixture-browser-key"\r\nexport GOOGLE_MAPS_KEY_MODE=demo # testing\r\nSERVER_SECRET=fixture-private-value\r\n';
+  const localConfig = '# Test values, never a real credential\r\nGOOGLE_MAPS_API_KEY="fixture-browser-key"\r\nexport GOOGLE_MAPS_KEY_MODE=demo # testing\r\nSERVER_SECRET=fixture-private-value\r\nGLOO_API_KEY=fixture-private-gloo\r\n';
   await withFixture(localConfig, {}, async call => {
     const result = await call('/api/maps-config');
     assert.deepEqual(JSON.parse(result.body), { apiKey:'fixture-browser-key', mode:'demo', configured:true });
     assert.ok(!result.body.includes('fixture-private-value'));
+    assert.ok(!result.body.includes('fixture-private-gloo'));
   });
   await withFixture(localConfig, { GOOGLE_MAPS_API_KEY:'fixture-override', GOOGLE_MAPS_KEY_MODE:'standard', SERVER_SECRET:'private' }, async call => {
     assert.deepEqual(JSON.parse((await call('/api/maps-config')).body), { apiKey:'fixture-override', mode:'standard', configured:true });

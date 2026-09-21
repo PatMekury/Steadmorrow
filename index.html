@@ -163,23 +163,41 @@
               <label class="priority-chip"><input id="priority-exploring" type="checkbox"><span>We’re still exploring</span></label>
             </div>
             <div class="priority-field">
-              <label for="priority-preserve">What should an option preserve or avoid? <span>Optional</span></label>
+              <label for="priority-preserve">What matters most as you explore? <span>Optional</span></label>
               <textarea id="priority-preserve" name="preserve" rows="2" maxlength="600" placeholder="Anything that matters to you"></textarea>
               <div class="priority-choices" role="group" aria-label="Suggested priorities">
                 <label class="priority-chip"><input type="checkbox" name="priority-choice" value="Retain ownership"><span>Retain ownership</span></label>
-                <label class="priority-chip"><input type="checkbox" name="priority-choice" value="Keep open space"><span>Keep open space</span></label>
-                <label class="priority-chip"><input type="checkbox" name="priority-choice" value="Limit the initial commitment"><span>Limit the initial commitment</span></label>
+                <label class="priority-chip"><input type="checkbox" name="priority-choice" value="Understand local housing needs"><span>Understand local housing needs</span></label>
               </div>
             </div>
-            <button class="land-button land-button-green" type="submit">Save priorities <span aria-hidden="true">→</span></button>
+            <button class="land-button land-button-green" type="submit">See first findings <span aria-hidden="true">→</span></button>
           </form>
           <div id="priorities-review" class="priorities-review" hidden>
             <p class="priority-eyebrow">Your starting view</p>
             <h3 id="priorities-review-title" tabindex="-1">Starting priorities</h3>
             <ul id="priorities-summary"></ul>
+            <button id="see-findings" class="land-button land-button-green" type="button">See first findings <span aria-hidden="true">→</span></button>
             <button id="edit-priorities" class="land-button land-button-outline" type="button">Edit priorities</button>
           </div>
           <p id="save-status" class="save-status" role="status" aria-live="polite"></p>
+        </section>
+        <section id="findings-step" class="findings-step" aria-labelledby="experience-title" hidden>
+          <p class="findings-scope">Based on your selected area and priorities. Property records haven’t been checked yet.</p>
+          <div id="findings-loading" class="findings-loading" role="status" hidden><span class="map-loading-mark" aria-hidden="true"></span><p>Preparing your first look…</p></div>
+          <div id="findings-error" class="findings-error" hidden>
+            <p id="findings-error-message" role="alert"></p>
+            <button id="retry-findings" class="land-button land-button-green" type="button">Try again</button>
+          </div>
+          <p id="findings-announcement" class="land-sr-only" role="status" aria-live="polite"></p>
+          <div id="findings-content" hidden>
+            <p id="findings-reflection" class="findings-reflection"></p>
+            <details class="findings-basis"><summary>Your starting point</summary><p id="findings-area"></p><p id="findings-priorities"></p><p>Your outline is approximate. Ownership, permission and local housing need remain unverified.</p></details>
+            <h3>Questions worth exploring</h3>
+            <div id="findings-questions" class="findings-questions"></div>
+            <div class="findings-next"><h3>A useful next conversation</h3><p id="findings-next-step"></p></div>
+            <p class="findings-attribution">Prepared with Gloo AI · Starting guidance, not a feasibility assessment.</p>
+          </div>
+          <button id="back-to-priorities" class="land-button land-button-outline" type="button">Review priorities</button>
         </section>
       </div>
     </section>

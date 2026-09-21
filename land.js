@@ -5,9 +5,10 @@ const storageKey = 'steadmorrow.land.v1';
 const initialView = { lat: 39.5, lng: -98.35 };
 const copy = value => value.map(point => ({ ...point }));
 const literal = value => ({ lat: typeof value.lat === 'function' ? value.lat() : value.lat, lng: typeof value.lng === 'function' ? value.lng() : value.lng });
-const priorityChoices = ['Retain ownership', 'Keep open space', 'Limit the initial commitment'];
+const priorityChoices = ['Retain ownership', 'Understand local housing needs'];
 let priorities = { purpose: '', preserve: '', exploring: false, choices: [], saved: false };
 let mapView;
+let findingsOpen = false, findingsController, findingsSequence = 0, lastFindings = null;
 let points = [], undoStack = [], mode = 'polygon', confirmed = false;
 let map, polygon, line, AdvancedMarkerElement, markers = [];
 let started = false, ready = false, searchSequence = 0, queryLabel = '', matchedLabel = '';
@@ -32,6 +33,8 @@ function restore() {
       choices: priorityChoices.filter(choice => Array.isArray(input.choices) && input.choices.includes(choice)),
       saved: input.saved === true,
     };
+    const retired = Array.isArray(input.choices) ? input.choices.filter(choice => ['Keep open space', 'Limit the initial commitment'].includes(choice)) : [];
+    if (retired.length) priorities.preserve = [priorities.preserve, ...retired].filter(Boolean).join(' · ').slice(0, 600);
     pendingQuery = queryLabel;
     undoStack = mode === 'click' ? (points.length ? [{ points: [], mode, queryLabel, matchedLabel: '' }] : [])
       : points.map((_, index) => ({ points: copy(points.slice(0, index)), mode, queryLabel, matchedLabel: '' }));
@@ -68,6 +71,7 @@ function render() {
   const valid = validatePolygon(points);
   const closeEnough = map && map.getZoom() >= 16;
   $('experience').dataset.hasSelection = String(points.length > 0);
+  $('experience').dataset.step = confirmed ? (findingsOpen ? 'findings' : 'priorities') : 'map';
   document.querySelector('.land-map-heading').hidden = !points.length && !pendingMatched;
   $('area-measure').hidden = !points.length;
   document.querySelector('.land-selection-footer').hidden = !points.length || confirmed;
@@ -99,9 +103,10 @@ function render() {
   for (const option of $('keyboard-corner').options) option.disabled = Number(option.value) >= points.length;
   if (Number($('keyboard-corner').value) >= points.length) $('keyboard-corner').value = '0';
   document.querySelector('.land-workbench').hidden = confirmed;
-  $('priorities-step').hidden = !confirmed;
+  $('priorities-step').hidden = !confirmed || findingsOpen;
+  $('findings-step').hidden = !confirmed || !findingsOpen;
   $('back-to-map').hidden = !confirmed;
-  $('experience-title').textContent = confirmed ? 'What matters here?' : 'Start with the land.';
+  $('experience-title').textContent = confirmed ? (findingsOpen ? 'A first look at this property' : 'What matters here?') : 'Start with the land.';
   $('priority-area').textContent = `Selected area · ${areaLabel()}`;
   renderPriorities();
   $('map-crosshair').hidden = !keyboardActive || !ready || confirmed || points.length === 4;
@@ -488,7 +493,7 @@ $('priorities-form').addEventListener('submit', event => {
   }
   priorities.saved = true;
   renderPriorities(); persist();
-  $('priorities-review-title').focus({ preventScroll: true });
+  void showFindings();
 });
 $('edit-priorities').addEventListener('click', () => {
   priorities.saved = false;
@@ -503,6 +508,7 @@ $('use-area').addEventListener('click', () => {
   render(); persist(); focusStep();
 });
 $('back-to-map').addEventListener('click', () => {
+  leaveFindings();
   confirmed = false;
   render(); persist(); focusStep();
   if (!started) void initialize();
@@ -511,6 +517,72 @@ $('back-to-map').addEventListener('click', () => {
     map.setZoom(mapView.zoom);
   });
 });
+function leaveFindings() {
+  findingsOpen = false;
+  ++findingsSequence;
+  findingsController?.abort();
+  $('findings-step').setAttribute('aria-busy', 'false');
+}
+
+function displayFindings(result) {
+  $('findings-reflection').textContent = result.reflection;
+  $('findings-area').textContent = `Area you marked: ${areaLabel().toLowerCase()}.`;
+  $('findings-priorities').textContent = [priorities.purpose.trim(), priorities.preserve.trim(), ...priorities.choices, priorities.exploring ? 'We’re still exploring' : ''].filter(Boolean).join(' · ');
+  $('findings-questions').replaceChildren(...result.questions.map(item => {
+    const detail = document.createElement('details');
+    const title = document.createElement('summary'); title.textContent = item.question;
+    const why = document.createElement('p'); why.textContent = item.why;
+    const ask = document.createElement('p'); ask.textContent = `Who or what could help: ${item.ask}`;
+    detail.append(title, why, ask); return detail;
+  }));
+  $('findings-next-step').textContent = result.nextStep;
+  $('findings-content').hidden = false;
+  $('findings-announcement').textContent = 'Your first look is ready.';
+}
+
+async function showFindings() {
+  if (!confirmed || !validatePolygon(points).valid) return;
+  findingsController?.abort();
+  const sequence = ++findingsSequence;
+  const controller = new AbortController();
+  findingsController = controller;
+  const input = {points, query: queryLabel, priorities: {purpose: priorities.purpose, matters: priorities.preserve, choices: priorities.choices, exploring: priorities.exploring}};
+  const signature = JSON.stringify(input);
+  findingsOpen = true;
+  $('findings-announcement').textContent = '';
+  $('findings-step').setAttribute('aria-busy', 'false');
+  $('findings-loading').hidden = true;
+  $('findings-error').hidden = true;
+  $('findings-content').hidden = true;
+  render(); focusStep();
+  if (lastFindings?.signature === signature) { displayFindings(lastFindings.result); return; }
+  $('findings-loading').hidden = false;
+  $('findings-step').setAttribute('aria-busy', 'true');
+  const timer = setTimeout(() => controller.abort(), 55000);
+  try {
+    const response = await fetch('/api/first-look', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: signature, signal: controller.signal});
+    const result = await response.json();
+    if (sequence !== findingsSequence || !findingsOpen) return;
+    if (!response.ok) throw new Error(result.error || 'The first-look service is unavailable. Please try again.');
+    if (result.evidenceStatus !== 'user-input-only' || !Array.isArray(result.questions) || result.questions.length !== 3) throw new Error('We couldn’t read this first look. Please try again.');
+    lastFindings = {signature, result};
+    displayFindings(result);
+  } catch (error) {
+    if (sequence !== findingsSequence || !findingsOpen) return;
+    $('findings-error-message').textContent = error.name === 'AbortError' ? 'This is taking longer than expected. Try again; your work is saved.' : error instanceof SyntaxError || error instanceof TypeError ? 'We couldn’t connect. Please try again; your work is saved.' : error.message;
+    $('findings-error').hidden = false;
+  } finally {
+    clearTimeout(timer);
+    if (sequence === findingsSequence) {
+      $('findings-loading').hidden = true;
+      $('findings-step').setAttribute('aria-busy', 'false');
+    }
+  }
+}
+$('see-findings').addEventListener('click', () => { void showFindings(); });
+$('retry-findings').addEventListener('click', () => { void showFindings(); });
+$('back-to-priorities').addEventListener('click', () => { leaveFindings(); render(); focusStep(); });
+
 $('keyboard-place').addEventListener('focus', () => { keyboardActive = true; render(); });
 $('keyboard-place').addEventListener('blur', () => { keyboardActive = false; render(); });
 $('keyboard-place').addEventListener('click', () => { if (map) selected(map.getCenter()); });

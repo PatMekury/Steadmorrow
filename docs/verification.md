@@ -78,3 +78,15 @@ Supersedes the earlier Area selected / Adjust area confirmation endpoint.
 - Saved priorities and reloaded: the summary and back arrow restored. Maps did not initialize while the priorities step was restored; Back to map then loaded the saved four-corner outline successfully.
 - Empty optional answers saved as We're still exploring. The summary received focus after saving; editing restored the fields. Temporary test input/geometry was cleared and viewport overrides reset.
 - Syntax check and all 15 existing geometry/server tests passed. Research/Gloo integration and cloud persistence remain unimplemented. Storage-denied recovery remains untested in a browser with storage disabled.
+
+
+## First live Gloo phase — September 18, 2026
+
+- Updated the second prompt to What matters most as you explore? Replaced Keep open space / Limit the initial commitment with Understand local housing needs; retained Retain ownership. Checked the rendered mobile form.
+- All 22 automated tests passed: existing geometry/server coverage plus Gloo request validation, key isolation, duplicate/cached requests, changed inputs and cache expiry, request limits, provider failure handling, malformed output, timeout and same-origin HTTP restrictions. No live calls are made by the tests.
+- Live browser request using a temporary Houston-area quadrilateral and the local-housing-needs preference succeeded through the actual Gloo endpoint. Returned three questions and a next conversation. No local property findings or citations were claimed.
+- A second live run after prompt refinement succeeded. Left the findings step while the request was active; its late response did not replace the priorities screen. Reopening returned the completed result promptly from server cache.
+- Desktop 1440×1000 and mobile 390×844 renders inspected against the guide's white/paper surfaces, Outfit hierarchy and green actions. Mobile had no horizontal overflow. Expandable question details worked. The findings step reserves viewport height so content does not jump below the hero while loading.
+- Reload retained the selected area and priorities and returned to the saved starting view. Returning from findings to map restored all four coordinates and the same approximate 10,133 m² measurement. Priority review/edit paths remained available.
+- Removed temporary test geometry and the selected test preference; reset viewport overrides. Final syntax and diff whitespace checks passed.
+- Limits: no independent property records, parcel verification, zoning retrieval or housing-statistics integration; output is explicitly user-input-only guidance. Error cases are covered with deterministic mocked-provider tests, not by causing real credit exhaustion. The AI output validator does not guarantee semantic accuracy. Gloo key and billing configuration remain private; no billing changes were made.

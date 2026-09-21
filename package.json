@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "start": "node scripts/serve.mjs",
-    "check": "node --check app.js && node --check land.js && node --check geometry.js && node --check scripts/serve.mjs",
-    "test": "node --test tests/geometry.test.mjs tests/server.test.mjs"
+    "check": "node --check app.js && node --check land.js && node --check geometry.js && node --check scripts/serve.mjs && node --check scripts/gloo.mjs",
+    "test": "node --test tests/geometry.test.mjs tests/server.test.mjs tests/gloo.test.mjs"
   },
   "engines": {
     "node": ">=20"

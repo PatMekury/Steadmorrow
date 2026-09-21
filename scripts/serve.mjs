@@ -1,3 +1,4 @@
+import { createFindingsService, handleFindings } from './gloo.mjs';
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { readFile, stat, realpath } from 'node:fs/promises';
@@ -7,12 +8,12 @@ import { resolve, relative, extname, isAbsolute, sep } from 'node:path';
 const publicFiles = new Set(['/', '/index.html', '/app.js', '/styles.css', '/land.js', '/land.css', '/geometry.js']);
 const types = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.svg':'image/svg+xml', '.webp':'image/webp', '.png':'image/png', '.mp4':'video/mp4', '.ttf':'font/ttf', '.woff2':'font/woff2', '.json':'application/json' };
 
-async function readMapsConfig(root, environment) {
+async function readAppConfig(root, environment) {
   const local = {};
   try {
     const source = await readFile(resolve(root, '.env.local'), 'utf8');
     for (const line of source.split(/\r?\n/)) {
-      const match = /^(?:export\s+)?(GOOGLE_MAPS_API_KEY|GOOGLE_MAPS_KEY_MODE)\s*=\s*(.*)$/.exec(line.trim());
+      const match = /^(?:export\s+)?(GOOGLE_MAPS_API_KEY|GOOGLE_MAPS_KEY_MODE|GLOO_API_KEY|GLOO_MODEL)\s*=\s*(.*)$/.exec(line.trim());
       if (!match) continue;
       let value = match[2].trim();
       if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
@@ -27,19 +28,25 @@ async function readMapsConfig(root, environment) {
   }
   const apiKey = String(environment.GOOGLE_MAPS_API_KEY ?? local.GOOGLE_MAPS_API_KEY ?? '').trim();
   const mode = String(environment.GOOGLE_MAPS_KEY_MODE ?? local.GOOGLE_MAPS_KEY_MODE ?? 'standard').trim() || 'standard';
-  return { apiKey, mode, configured: Boolean(apiKey) };
+  return {
+    maps: { apiKey, mode, configured: Boolean(apiKey) },
+    gloo: { apiKey: String(environment.GLOO_API_KEY ?? local.GLOO_API_KEY ?? '').trim(), model: String(environment.GLOO_MODEL ?? local.GLOO_MODEL ?? 'gloo-openai-gpt-5-mini').trim() },
+  };
 }
 
 export async function createAppServer(directory = fileURLToPath(new URL('../', import.meta.url)), environment = process.env) {
   const root = await realpath(directory);
   // This is a browser API key. Only the two public Maps settings are exposed.
-  const mapsConfig = JSON.stringify(await readMapsConfig(root, environment));
+  const config = await readAppConfig(root, environment);
+  const mapsConfig = JSON.stringify(config.maps);
+  const review = createFindingsService(config.gloo);
   return createServer(async (request, response) => {
     const fail = (status, message) => {
       response.writeHead(status, { 'Content-Type':'text/plain; charset=utf-8', 'X-Content-Type-Options':'nosniff' });
       response.end(request.method === 'HEAD' ? undefined : message);
     };
     try {
+      if (request.url.split(/[?#]/, 1)[0] === '/api/first-look') return await handleFindings(request, response, review);
       if (!['GET', 'HEAD'].includes(request.method)) return fail(405, 'Method not allowed');
       // Inspect before URL normalization so encoded and literal traversal are rejected.
       const pathname = decodeURIComponent(request.url.split(/[?#]/, 1)[0]);
