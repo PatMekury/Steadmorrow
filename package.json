@@ -7,10 +7,14 @@
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "start": "node scripts/serve.mjs",
-    "check": "node --check app.js && node --check land.js && node --check geometry.js && node --check scripts/serve.mjs && node --check scripts/gloo.mjs",
-    "test": "node --test tests/geometry.test.mjs tests/server.test.mjs tests/gloo.test.mjs"
+    "check": "node --check app.js && node --check land.js && node --check geometry.js && node --check scripts/serve.mjs && node --check scripts/gloo.mjs && node --check findings.js && node --check scripts/records.mjs && node --check scripts/evidence-client.mjs && node --check scripts/site-geometry.mjs",
+    "test": "node --test tests/geometry.test.mjs tests/server.test.mjs tests/gloo.test.mjs tests/records.test.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.18.1"
+  },
+  "dependencies": {
+    "cheerio": "1.2.0",
+    "polygon-clipping": "0.15.7"
   }
 }

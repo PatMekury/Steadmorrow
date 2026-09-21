@@ -18,7 +18,7 @@ Before declaring completion, compare the actual application and checks with thos
 
 **Affordable housing remains the purpose.** Distinguish a physically possible housing concept from supported affordability conditions, commitments and delivery. Do not let generic building generation replace the challenge's affordable-housing outcome.
 
-**Current replacement brief:** `C:\Users\patmekury\Documents\Gloo hackathon\output\strategy\Steadmorrow_Challenge_Aligned_Experience.md` records the September 20 audit, recommended findings/simulation/presentation design, dependencies and acceptance gates. Read it for this replacement work, while retaining the original challenge PDF as the authority. It is a plan, not implemented functionality; the pilot jurisdiction is a recommendation, not a user-selected location.
+**Current replacement brief:** `C:\Users\patmekury\Documents\Gloo hackathon\output\strategy\Steadmorrow_Challenge_Aligned_Experience.md` records the September 20 audit, recommended findings/simulation/presentation design, dependencies and acceptance gates. Read it for this replacement work, while retaining the original challenge PDF as the authority. It is a design plan. Its earlier pilot-jurisdiction recommendation was explicitly rejected by the user and is superseded by the location-driven scope below.
 
 **Core success chain:** church address and optional parcel details → retrieve relevant public parcel data and zoning provisions → preliminary plain-language feasibility with sources and uncertainty → likely obstacles with supported, mission-aligned responses → editable one-pager, slides and talking points. The brief's test is a non-expert leader obtaining a credible snapshot and presentation in minutes. Treat that timing as a target until measured. Preserve expert review and human authority over legal, financial and published decisions. Do not invent zoning provisions, approvals, costs, unit counts, sources, community support or Scripture.
 
@@ -45,7 +45,7 @@ Read the project context at `C:\Users\patmekury\Documents\Gloo hackathon\AGENTS.
 
 ## Current implementation — September 18, 2026
 
-The opening section and **Start with the land** section are implemented in vanilla HTML/CSS/JavaScript with a dependency-free Node development server. Run `npm run dev` with Node.js 20 or later; preview at `http://127.0.0.1:5173`. `npm run check` checks syntax and `npm test` runs geometry/server tests. Consult `README.md` and `docs/verification.md` for checked behavior and remaining verification.
+The opening section and **Start with the land** section are implemented in vanilla HTML/CSS/JavaScript with a dependency-free Node development server. Run `npm run dev` with Node.js 20.18.1 or later; preview at `http://127.0.0.1:5173`. `npm run check` checks syntax and `npm test` runs geometry/server tests. Consult `README.md` and `docs/verification.md` for checked behavior and remaining verification.
 
 ### Preserve the opening section
 
@@ -95,3 +95,17 @@ Undo and Clear must remain visible beneath the right-hand selection modes even b
 The user rejected developer-oriented preference suggestions. Use **What matters most as you explore?** and **Understand local housing needs**; Retain ownership remains. Do not reintroduce Keep open space or Limit the initial commitment as suggestions.
 
 Use scripts/gloo.mjs for server-only Gloo requests. /api/first-look returns preliminary guidance based only on user input, not retrieved records. Keep the scope statement visible, factual area calculations deterministic, and Gloo output out of innerHTML. The next step replaces the workspace and preserves back navigation. Never expose the key through /api/maps-config. Consult docs/gloo-development.md and verification.md before expanding into evidence retrieval.
+
+
+## Location scope — user correction, September 21, 2026
+
+First findings is location-driven. Do not select a pilot city, require a demo property, hard-code local rules, or use a city allowlist. The user explicitly rejected a Poulsbo-first implementation. Discover records for the selected location and disclose provider coverage, incomplete matches and unavailable sources. A city may be a test case, not the product scope. This supersedes pilot-city proposals in earlier strategy documents.
+
+
+## Current findings implementation — September 21, 2026
+
+The rejected user-input-only first look has been replaced with location-driven public-record retrieval. Consult `docs/first-findings.md`, `docs/gloo-development.md` and `docs/verification.md` for current status; earlier September 18 descriptions are historical. Use `npm ci` before starting: the Node server now uses pinned Cheerio and polygon-clipping dependencies.
+
+Parcel/zoning catalogue discovery, polygon intersections, multiple-parcel choice, split/partial-zoning checks, published Municode provisions and ACS housing estimates are implemented. A conditional Gloo interpretation uses server-attached source passages. Provider failures preserve available records. Current provider coverage is U.S. geographic lookup plus discoverable public GIS and the connected code publisher, not complete nationwide or worldwide coverage. There is no city allowlist or hard-coded local rule pack.
+
+First findings replaces the map workspace and preserves Back to map/Edit priorities. Public records begin loading while priorities are completed. Do not revive the old three-question reflection or extra saved-summary stage. No numeric capacity, comprehensive environmental/title/utility assessment, structure simulation or presentation exports have been implemented. Continue those from the challenge brief; never substitute a concept image for evidence.

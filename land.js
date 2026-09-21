@@ -1,4 +1,5 @@
 import { validatePolygon, areaSquareMeters, polygonCenter } from './geometry.js';
+import { renderFindings } from './findings.js';
 
 const $ = id => document.getElementById(id);
 const storageKey = 'steadmorrow.land.v1';
@@ -9,6 +10,7 @@ const priorityChoices = ['Retain ownership', 'Understand local housing needs'];
 let priorities = { purpose: '', preserve: '', exploring: false, choices: [], saved: false };
 let mapView;
 let findingsOpen = false, findingsController, findingsSequence = 0, lastFindings = null;
+let parcelKey = null, parcelShape = '', evidenceRequest = null;
 let points = [], undoStack = [], mode = 'polygon', confirmed = false;
 let map, polygon, line, AdvancedMarkerElement, markers = [];
 let started = false, ready = false, searchSequence = 0, queryLabel = '', matchedLabel = '';
@@ -106,7 +108,7 @@ function render() {
   $('priorities-step').hidden = !confirmed || findingsOpen;
   $('findings-step').hidden = !confirmed || !findingsOpen;
   $('back-to-map').hidden = !confirmed;
-  $('experience-title').textContent = confirmed ? (findingsOpen ? 'A first look at this property' : 'What matters here?') : 'Start with the land.';
+  $('experience-title').textContent = confirmed ? (findingsOpen ? 'First findings' : 'What matters here?') : 'Start with the land.';
   $('priority-area').textContent = `Selected area · ${areaLabel()}`;
   renderPriorities();
   $('map-crosshair').hidden = !keyboardActive || !ready || confirmed || points.length === 4;
@@ -460,8 +462,8 @@ function focusStep() {
 }
 
 function renderPriorities() {
-  $('priorities-form').hidden = priorities.saved;
-  $('priorities-review').hidden = !priorities.saved;
+  $('priorities-form').hidden = false;
+  $('priorities-review').hidden = true;
   const lines = [
     [priorities.purpose.trim(), priorities.exploring ? 'We’re still exploring' : ''].filter(Boolean).join(' · '),
     priorities.preserve.trim(),
@@ -506,6 +508,7 @@ $('use-area').addEventListener('click', () => {
   mapView = { center: map.getCenter(), zoom: map.getZoom() };
   confirmed = true;
   render(); persist(); focusStep();
+  void prepareEvidence(findingsInput());
 });
 $('back-to-map').addEventListener('click', () => {
   leaveFindings();
@@ -522,50 +525,66 @@ function leaveFindings() {
   ++findingsSequence;
   findingsController?.abort();
   $('findings-step').setAttribute('aria-busy', 'false');
+  $('findings-progress').hidden = true;
 }
 
 function displayFindings(result) {
-  $('findings-reflection').textContent = result.reflection;
-  $('findings-area').textContent = `Area you marked: ${areaLabel().toLowerCase()}.`;
-  $('findings-priorities').textContent = [priorities.purpose.trim(), priorities.preserve.trim(), ...priorities.choices, priorities.exploring ? 'We’re still exploring' : ''].filter(Boolean).join(' · ');
-  $('findings-questions').replaceChildren(...result.questions.map(item => {
-    const detail = document.createElement('details');
-    const title = document.createElement('summary'); title.textContent = item.question;
-    const why = document.createElement('p'); why.textContent = item.why;
-    const ask = document.createElement('p'); ask.textContent = `Who or what could help: ${item.ask}`;
-    detail.append(title, why, ask); return detail;
-  }));
-  $('findings-next-step').textContent = result.nextStep;
+  renderFindings($('findings-content'), result, {onParcel: key => {
+    parcelKey = key; parcelShape = JSON.stringify(points); lastFindings = null;
+    void showFindings();
+  }});
   $('findings-content').hidden = false;
-  $('findings-announcement').textContent = 'Your first look is ready.';
+  $('findings-announcement').textContent = result.narrativeStatus === 'ready' ? 'Your preliminary findings are ready.' : 'The available property records are ready.';
 }
 
-async function showFindings() {
+function findingsInput() {
+  if (parcelShape !== JSON.stringify(points)) parcelKey = null;
+  return {points: copy(points), query: queryLabel, parcelKey, priorities: {purpose: priorities.purpose, matters: priorities.preserve, choices: priorities.choices, exploring: priorities.exploring}};
+}
+function prepareEvidence(input, retry = false) {
+  const key = JSON.stringify({points: input.points, parcelKey: input.parcelKey});
+  if (!retry && evidenceRequest?.key === key && Date.now() - evidenceRequest.time < 15 * 60 * 1000) return evidenceRequest.promise;
+  const promise = fetch('/api/property-evidence', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(input), signal: AbortSignal.timeout(90000)})
+    .then(async response => {const result = await response.json(); if (!response.ok) throw new Error(result.error || 'The records lookup is unavailable.'); return result;})
+    .catch(error => ({lookupError: error.message}));
+  evidenceRequest = {key, promise, time: Date.now()};
+  return promise;
+}
+async function showFindings(retry = false) {
   if (!confirmed || !validatePolygon(points).valid) return;
   findingsController?.abort();
   const sequence = ++findingsSequence;
   const controller = new AbortController();
   findingsController = controller;
-  const input = {points, query: queryLabel, priorities: {purpose: priorities.purpose, matters: priorities.preserve, choices: priorities.choices, exploring: priorities.exploring}};
+  const input = findingsInput();
   const signature = JSON.stringify(input);
   findingsOpen = true;
   $('findings-announcement').textContent = '';
   $('findings-step').setAttribute('aria-busy', 'false');
   $('findings-loading').hidden = true;
   $('findings-error').hidden = true;
+  $('findings-progress').hidden = true;
   $('findings-content').hidden = true;
   render(); focusStep();
-  if (lastFindings?.signature === signature) { displayFindings(lastFindings.result); return; }
+  if (!retry && lastFindings?.signature === signature && Date.now() - lastFindings.time < 15 * 60 * 1000) { displayFindings(lastFindings.result); return; }
   $('findings-loading').hidden = false;
   $('findings-step').setAttribute('aria-busy', 'true');
-  const timer = setTimeout(() => controller.abort(), 55000);
+  const timer = setTimeout(() => controller.abort(), 140000);
   try {
+    const records = await prepareEvidence(input, retry);
+    if (sequence !== findingsSequence || !findingsOpen) return;
+    if (records.lookupError) throw new Error(records.lookupError);
+    if (records.schemaVersion !== 2 || !Array.isArray(records.sources)) throw new Error('We couldn’t read the property records. Please retry.');
+    displayFindings(records);
+    $('findings-loading').hidden = true;
+    if (!records.code.length || !records.parcel || records.zones.length !== 1 || records.status === 'needs-parcel' || records.locality?.boundaryUncertain || records.gaps.some(g => g.id === 'zoning-coverage')) return;
+    $('findings-progress').hidden = false;
     const response = await fetch('/api/first-look', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: signature, signal: controller.signal});
     const result = await response.json();
     if (sequence !== findingsSequence || !findingsOpen) return;
     if (!response.ok) throw new Error(result.error || 'The first-look service is unavailable. Please try again.');
-    if (result.evidenceStatus !== 'user-input-only' || !Array.isArray(result.questions) || result.questions.length !== 3) throw new Error('We couldn’t read this first look. Please try again.');
-    lastFindings = {signature, result};
+    if (result.schemaVersion !== 2 || !Array.isArray(result.sources)) throw new Error('We couldn’t read these findings. Please try again.');
+    lastFindings = {signature, result, time: Date.now()};
     displayFindings(result);
   } catch (error) {
     if (sequence !== findingsSequence || !findingsOpen) return;
@@ -575,13 +594,15 @@ async function showFindings() {
     clearTimeout(timer);
     if (sequence === findingsSequence) {
       $('findings-loading').hidden = true;
+      $('findings-progress').hidden = true;
       $('findings-step').setAttribute('aria-busy', 'false');
     }
   }
 }
 $('see-findings').addEventListener('click', () => { void showFindings(); });
-$('retry-findings').addEventListener('click', () => { void showFindings(); });
-$('back-to-priorities').addEventListener('click', () => { leaveFindings(); render(); focusStep(); });
+$('retry-findings').addEventListener('click', () => { void showFindings(true); });
+$('refresh-findings').addEventListener('click', () => { void showFindings(true); });
+$('back-to-priorities').addEventListener('click', () => { leaveFindings(); priorities.saved = false; render(); focusStep(); });
 
 $('keyboard-place').addEventListener('focus', () => { keyboardActive = true; render(); });
 $('keyboard-place').addEventListener('blur', () => { keyboardActive = false; render(); });

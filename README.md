@@ -4,7 +4,7 @@ The Steadmorrow landing page and **Start with the land** experience, using the a
 
 ## Run locally
 
-With Node.js 20 or later, run `npm run dev` or `node scripts/serve.mjs`, then open <http://127.0.0.1:5173>. There are no runtime packages to install. Gloo calls run on the local server. The local server supports byte ranges so the video can seek reliably.
+With Node.js 20.18.1 or later, run `npm run dev` or `node scripts/serve.mjs`, then open <http://127.0.0.1:5173>. Run `npm ci` first to install the pinned HTML-parsing and polygon-intersection dependencies. Gloo calls run on the local server. The local server supports byte ranges so the video can seek reliably.
 
 For Maps, copy `.env.example` to `.env.local` and set `GOOGLE_MAPS_API_KEY` and `GOOGLE_MAPS_KEY_MODE`. A demo key is already saved locally for this development environment. Never commit its value. Restart the server after changing configuration. See `docs/maps-development.md` for the demo key's limits and runtime behavior.
 
@@ -27,10 +27,12 @@ For Maps, copy `.env.example` to `.env.local` and set `GOOGLE_MAPS_API_KEY` and 
 - **Click to select:** click the land to create a four-corner starting area around that point, then move its corners to fit. This is a convenient starting shape, not an inferred parcel boundary.
 - Zoom in to land level before placing an area. Larger Undo and Clear buttons sit in the right-hand panel below the selection modes. Fit selection remains on the map. Crossed edges, duplicate corners, and degenerate areas cannot be confirmed.
 - Keyboard controls place a corner or starting area at the map center. With the placement button focused, arrow keys move the center; Shift moves farther. A corner selector and directional controls adjust existing corners.
-- **Use this area** opens **What matters here?** in the same workspace. **Back to map** returns to the outline and preserves the answers. Two optional prompts and suggested priorities can be saved as an editable **Your starting view** summary. User-drawn geometry, the user's associated search text, mode, confirmation state, and starting priorities are saved only in this browser; Google Places result content is not persisted. A storage failure is reported without preventing selection during the visit.
+- **Use this area** opens **What matters here?** in the same workspace. **Back to map** returns to the outline and preserves the answers. Two optional prompts and suggested priorities lead directly to **First findings**. User-drawn geometry, the user's associated search text, mode, confirmation state, and starting priorities are saved only in this browser; Google Places result content is not persisted. A storage failure is reported without preventing selection during the visit.
 - Loading, unavailable-map, search-failure, and empty-result states preserve the user's selection where possible.
 
-The selected outline is an exploration area. It does not establish parcel boundaries, ownership, permission, buildability, or housing capacity. See first findings now opens a live Gloo-assisted first look: three questions and a suggested next conversation, based on the selected area and priorities. Property-record research, agent orchestration, sign-in, and subsequent decision/export flows are not implemented. No Request a demo action exists.
+The selected outline is an exploration area. It does not establish ownership, permission or buildability. **First findings** now retrieves location-driven public parcel/zoning records, published code provisions and housing estimates, then adds a conditional Gloo interpretation when the parcel and zoning match is sufficiently clear. Sources, split-zoning conflicts and missing checks remain visible. No city is hard-coded or selected as a pilot. Provider coverage varies; the current geographic adapter covers U.S. jurisdictions and municipal-code retrieval uses Municode.
+
+Read [First findings](docs/first-findings.md) for the data chain, safeguards, coverage and limitations. Housing capacity calculations, structure simulation, presentation exports, accounts and public deployment remain unimplemented. No Request a demo action exists.
 
 ## Required design reference
 
@@ -57,9 +59,9 @@ The city animation is an illustrative concept. It is not a surveyed parcel, veri
 
 ## Checks
 
-Run `npm run check` for JavaScript syntax and `npm test` for geometry and local-server tests. All 15 tests passed during the September 18 implementation check. Live browser checks covered Maps loading, search, four-corner placement, dragging, blocked crossed outlines, undo, confirmation, and restoring a selection after reload. Keyboard selection and desktop, tablet (768×1024), and mobile (390×844 and 320×480) layouts also passed browser review. Details are recorded in `docs/verification.md`.
+Run `npm run check` for JavaScript syntax and `npm test` for geometry and local-server tests. The September 21 suite has 33 passing tests, including source validation, code retrieval, Gloo citations, multi-parcel selection and incomplete zoning coverage. Earlier map interaction checks were completed September 18. Live browser checks covered Maps loading, search, four-corner placement, dragging, blocked crossed outlines, undo, confirmation, and restoring a selection after reload. Keyboard selection and desktop, tablet (768×1024), and mobile (390×844 and 320×480) layouts also passed browser review. Details are recorded in `docs/verification.md`.
 
-The local server exposes the approved browser files and assets plus `/api/maps-config` and the same-origin `POST /api/first-look` endpoint. Documentation, tests, scripts, package files, and dotfiles are not publicly served. This is a local development application, not a public deployment.
+The local server exposes the approved browser files and assets plus `/api/maps-config` and the same-origin `POST /api/property-evidence` and `POST /api/first-look` endpoints. Documentation, tests, scripts, package files, and dotfiles are not publicly served. This is a local development application, not a public deployment.
 
 
 For Gloo, set server-only `GLOO_API_KEY` in `.env.local`; an active development credential is already saved in this environment. Restart after configuration changes. See [Gloo development notes](docs/gloo-development.md) for scope, limits and verification.
