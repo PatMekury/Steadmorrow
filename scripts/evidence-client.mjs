@@ -1,14 +1,15 @@
 import { createHash } from 'node:crypto';
+import { verifiedProvider } from './source-providers.mjs';
 
 export const digest = value => createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex');
 
 // Only adapter-owned URLs are accepted. No user-supplied fetch targets or credentials.
-const hosts = new Set(['www.arcgis.com', 'geocoding.geo.census.gov', 'api.censusreporter.org', 'api.municode.com', 'library.municode.com']);
+const hosts = new Set(['www.arcgis.com', 'geocoding.geo.census.gov', 'api.censusreporter.org', 'api.municode.com', 'library.municode.com','ecode360.com']);
 export function isSourceUrl(value) {
   try {
     const u = new URL(value);
     return u.protocol === 'https:' && !u.username && !u.password && (!u.port || u.port === '443') &&
-      (hosts.has(u.hostname) || /^services\d*\.arcgis\.com$/.test(u.hostname) || u.hostname.endsWith('.gov') || /\.(?:state\.[a-z]{2}|(?:co|ci)\.[a-z-]+\.[a-z]{2})\.us$/.test(u.hostname));
+      (hosts.has(u.hostname) || /^services\d*\.arcgis\.com$/.test(u.hostname) || u.hostname.endsWith('.gov') || /\.(?:state\.[a-z]{2}|(?:co|ci)\.[a-z-]+\.[a-z]{2})\.us$/.test(u.hostname) || Boolean(verifiedProvider(value)));
   } catch { return false; }
 }
 export function createEvidenceClient({ fetchImpl = fetch, now = Date.now, timeoutMs = 12000 } = {}) {

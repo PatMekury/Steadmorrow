@@ -1,5 +1,14 @@
 # Steadmorrow application
 
+## Mandatory Gloo agency — user correction, September 21, 2026
+
+Gloo must direct the research and interpret its results. A programmed fetch pipeline followed by an AI summary does not meet the user's requirement. Preserve a real tool-calling loop: Gloo selects lookups, sees evidence/errors, chooses useful follow-ups and produces the sourced assessment. Deterministic services still execute requests, validate geometry, calculate facts and enforce provenance. Do not present plain retrieval as an agent or silently use it as a fallback.
+
+The live First findings flow now uses `scripts/gloo.mjs` with the per-case registry in `scripts/agent-tools.mjs`. Research starts on **See first findings** and streams actual progress. The existing guarded Gloo API/key is used; no Studio-hosted agent was created or verified. Read `docs/gloo-agent.md` and the latest verification before changing the architecture. Earlier strategy wording that limited Gloo to interpreting pre-fetched records is superseded by this explicit user decision.
+
+This implements the property research/interpretation agent. Future options and presentation work must also use Gloo-directed agent workflows where research/reasoning is needed. Those later stages, numeric feasibility and comprehensive external-data coverage remain unimplemented; do not claim all planned agents or the challenge outcome are complete.
+
+
 ## Mandatory challenge alignment — September 20, 2026
 
 This is a competition project. The assistant is responsible for keeping it aligned; do not make the user repeatedly rediscover drift. A working API, polished screen, extra agent, or impressive animation is not evidence that the challenge has been met.
@@ -109,3 +118,35 @@ The rejected user-input-only first look has been replaced with location-driven p
 Parcel/zoning catalogue discovery, polygon intersections, multiple-parcel choice, split/partial-zoning checks, published Municode provisions and ACS housing estimates are implemented. A conditional Gloo interpretation uses server-attached source passages. Provider failures preserve available records. Current provider coverage is U.S. geographic lookup plus discoverable public GIS and the connected code publisher, not complete nationwide or worldwide coverage. There is no city allowlist or hard-coded local rule pack.
 
 First findings replaces the map workspace and preserves Back to map/Edit priorities. Public records begin loading while priorities are completed. Do not revive the old three-question reflection or extra saved-summary stage. No numeric capacity, comprehensive environmental/title/utility assessment, structure simulation or presentation exports have been implemented. Continue those from the challenge brief; never substitute a concept image for evidence.
+
+
+### Retrieval reliability correction — September 21, 2026
+
+The user requires broad location-driven retrieval, not a pilot city. Verified non-.gov public-source endpoints now live in `scripts/source-providers.mjs`; these identify trusted providers and do not restrict which locations users may select. Keep proof of authority and exact service paths when extending this registry. Full ArcGIS item metadata, common parcel/property identifiers, source fallback and distinct failure/no-match statuses are supported. Official planning guidance can explicitly establish no zoning; absence of a zoning result cannot.
+
+Gloo now distinguishes matched-site assessment from local-rules explanation when parcel or zoning applicability remains unresolved. Do not restore the old requirement for a zoning district in every jurisdiction or hide useful retrieved facts after one provider fails. The reported saved Houston selection now retrieves its parcel and a sourced interpretation; additional Austin and Seattle checks exercise the generic pipeline. All 42 tests pass. Coverage is still bounded by connected U.S. providers; do not claim every location or all information is retrievable. See the updated verification and first-findings documents.
+
+
+### Multi-location agent retrieval correction — September 21, 2026
+
+The user's Beverly NJ and New York selections exposed a too-small local Gloo call cap, parcel schema/discovery gaps, a single-code-publisher assumption, and stale zoning queries after parcel matching. The live code uses a bounded 480-model-call rolling daily process limit, validates parcel/zoning layer fields before accepting discovery, supports BBL/PAMS and related identifiers, preserves verified provider provenance, and invalidates zoning tool caches when parcel geometry changes. Verified regional catalogue connections supplement generic discovery; they do not restrict selectable locations. Gloo can also navigate connected original HTML code publications by discovered IDs. Beverly's current eCode360 publication is access-blocked from the server; do not claim its zoning was verified or bypass the denial. Overlapping parcels require the user's choice. See the latest docs/verification.md for actual results and limitations.
+
+
+## U.S. coordinate-driven retrieval — September 21, 2026
+
+The user requires location-driven research throughout the United States, including rural land and creek areas, rather than city-by-city product scope. This is a coverage objective, not evidence of complete coverage. No new city rule pack or provider allowlist entry was added in this correction. Work remains on free/public sources; no paid provider account, subscription or credential was created.
+
+- Census functional status now distinguishes an active town/township from a statistical county subdivision. Code-directory matching uses the selected authority and common directory name orderings (for example Town of X / X town), never a postal city. Statistical/nonfunctioning county areas do not become invented local governments. Active subdivision boundaries participate in corner consistency checks. Census geography remains a discovery clue; it cannot settle tribal/federal jurisdiction or exclusive planning authority.
+- Gloo can request local or regional catalogue discovery. Regional discovery preserves the location-specific search, reads another result page and adds a wider spatial search. Search failure does not discard registered connections. Statewide authoritative publishers can be discovered; relevant layers are ranked across a service's leaf list rather than only its first eight layers. Search/failure/truncation diagnostics are returned to Gloo. Time, page, candidate and source bounds remain explicit.
+- Gloo can inspect source-provided parcel fields and choose an unfamiliar identifier field. The server restricts that choice to this source's allowed metadata; owner/contact fields, generic object IDs, county boundaries, PLSS survey grids and non-parcel layers are not promoted to parcel records. Common tax-map-key fields also resolve automatically. A known zoning field supplied explicitly by Gloo is accepted; ZONING_ID cannot replace the district field.
+- A failed local search or exhausted local source list triggers a regional-recovery requirement. Geometry queries still determine overlap; catalogue matches alone are not property findings.
+- Flood, tsunami, enterprise, moisture, trade and other non-planning zone datasets are excluded from zoning discovery. A creek or water selection is not presumed vacant, ownerless, buildable or exempt from rules. Environmental, water, access, title, affordability and permission checks remain unresolved unless separately evidenced.
+
+Reference for geographic government distinctions: https://www.census.gov/library/reference/code-lists/functional-status-codes.html . Actual official code provisions are still required before a housing-permission assessment; broader map discovery does not supply missing law.
+
+
+## Property-only input privacy — September 21, 2026
+
+The user explicitly requested implementing the challenge's people-data guardrail. Consult docs/data-use.md for the real-public-data versus synthetic-test declaration and limitations. Do not add scraped congregational/member, donor, counseling/prayer or identifiable child records to Steadmorrow. The product uses public property/planning sources, aggregate housing statistics and nonpersonal property goals. A claim of consent or synthetic data is not an input-validation bypass.
+
+input-privacy.js supplies deterministic local checks shared by the browser and server. Flagged free text is not persisted or sent to research; it stays editable. Previously saved flagged text is cleaned on load, retaining geometry and safe choices. Google autocomplete/manual search are also screened. Both Gloo research routes validate before constructing sessions or making upstream calls. Private public-record fields are filtered by name and alias; unsolicited feature attributes are discarded. Production logs must not echo user text. The interface gives a short property-only/Gloo processing notice. Screening is incomplete by nature: never claim perfect PII detection or consent verification.

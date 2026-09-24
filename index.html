@@ -157,14 +157,16 @@
         <section id="priorities-step" class="priorities-step" aria-labelledby="experience-title" hidden>
           <p id="priority-area" class="priority-area"></p>
           <form id="priorities-form" class="priorities-form">
+            <p id="priority-privacy-note" class="save-status">Share property goals, not personal information. Your goals are sent to Gloo to guide the research.</p>
+            <p id="priority-privacy-error" class="selection-error" role="alert" hidden></p>
             <div class="priority-field">
               <label for="priority-purpose">What would you like this land to make possible? <span>Optional</span></label>
-              <textarea id="priority-purpose" name="purpose" rows="2" maxlength="600" placeholder="What do you have in mind?"></textarea>
+              <textarea id="priority-purpose" name="purpose" rows="2" maxlength="600" aria-describedby="priority-privacy-note priority-privacy-error" placeholder="For example, affordable homes for local families"></textarea>
               <label class="priority-chip"><input id="priority-exploring" type="checkbox"><span>We’re still exploring</span></label>
             </div>
             <div class="priority-field">
               <label for="priority-preserve">What matters most as you explore? <span>Optional</span></label>
-              <textarea id="priority-preserve" name="preserve" rows="2" maxlength="600" placeholder="Anything that matters to you"></textarea>
+              <textarea id="priority-preserve" name="preserve" rows="2" maxlength="600" aria-describedby="priority-privacy-note priority-privacy-error" placeholder="For example, retain ownership and understand local housing needs"></textarea>
               <div class="priority-choices" role="group" aria-label="Suggested priorities">
                 <label class="priority-chip"><input type="checkbox" name="priority-choice" value="Retain ownership"><span>Retain ownership</span></label>
                 <label class="priority-chip"><input type="checkbox" name="priority-choice" value="Understand local housing needs"><span>Understand local housing needs</span></label>

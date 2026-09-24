@@ -1,8 +1,14 @@
+import {isPrivateRecordField} from '../input-privacy.js';
 import { load } from 'cheerio';
+import {jurisdictionFromGeographies,localityNames,sameJurisdiction} from './jurisdiction.mjs';
 import { createEvidenceClient, queryFeatures, digest, isSourceUrl } from './evidence-client.mjs';
 import { selectedGeometry, fromRings, overlapArea, multiArea, union, ringsOf } from './site-geometry.mjs';
 import { polygonCenter } from '../geometry.js';
+import { verifiedProvider,catalogueConnections,connectionMatches } from './source-providers.mjs';
+import { planningContext,municipalClient } from './planning-context.mjs';
 
+const parcelIdPatterns=[/^bbl$/i,/^(?:tmk_txt|cty_tmk|tmk|tax_?map_?key|parcel_?number|parcel_?no|parcel_?key|assessor_?parcel_?number|parcelnum|parcelnumb)$/i,/^(?:pams_pin|gis_pin|pin_nodup|newgisid|swis_sbl_id|muni_parcel_id|print_key|sbl)$/i,/^parcel[\s_]*(id|num|number|nbr)$/i,/^pin$/i,/^apn$/i,/^acct_(no|num)$/i,/^(hcad|tax|property|prop)[\s_]*(num|id)$/i,/^pid$/i,/^(taxlot|taxlot_id|parcelid)$/i,/parcel.*(identification|number|id)|account|tax.?lot/i];
+const zoneIdPatterns=[/^zoning$/i,/^zone_code$/i,/^zoning_?code$/i,/^zoning_ztype$/i,/^base_zone$/i,/^zoning_base$/i,/^zone$/i,/^zone_?class$/i,/^district$/i,/^zone_?dist(?:rict)?$/i];
 const arc = 'https://www.arcgis.com/sharing/rest';
 const muni = 'https://library.municode.com/api';
 const plain = html => load(String(html ?? '')).text().replace(/\s+/g,' ').trim();
@@ -17,75 +23,117 @@ function source(id,title,publisher,response,extra={}) {
 export async function locate(read, points) {
   const center=polygonCenter(points);
   const positions=[center,...points];
-  const responses=await Promise.all(positions.map(p=>read(makeUrl('https://geocoding.geo.census.gov/geocoder/geographies/coordinates',{
+  const responses=await Promise.all(positions.map(p=>settle(read(makeUrl('https://geocoding.geo.census.gov/geocoder/geographies/coordinates',{
     x:p.lng.toFixed(6),y:p.lat.toFixed(6),benchmark:'Public_AR_Current',vintage:'Current_Current',layers:'States,Counties,Incorporated Places,County Subdivisions',format:'json',
-  }))));
-  const unpack=r=>{
-    const g=r.data.result?.geographies;
-    if (!g?.States?.length || !g?.Counties?.length) return null;
-    const state=g.States[0], county=g.Counties[0], city=g['Incorporated Places']?.[0], subdivision=g['County Subdivisions']?.[0];
-    return {state:state.NAME,stateAbbr:state.STUSAB,stateId:state.STATE,county:county.NAME,countyBase:county.BASENAME,countyId:county.GEOID,city:city?.BASENAME??null,cityId:city?.GEOID??null,subdivision:subdivision?.NAME??null};
-  };
+  })))));
+  const unpack=r=>jurisdictionFromGeographies(r.ok?r.value.data.result?.geographies:null);
   const locality=unpack(responses[0]);
   if (!locality) return null;
-  locality.boundaryUncertain=responses.some(r=>{const j=unpack(r);return !j||j.stateId!==locality.stateId||j.countyId!==locality.countyId||j.cityId!==locality.cityId;});
-  locality.label=[locality.city||locality.county,locality.stateAbbr].join(', ');
-  return {locality,evidence:source('jurisdiction','Geographic jurisdiction lookup','U.S. Census Bureau',responses[0],{text:`Selected-area center: ${locality.label}; county: ${locality.county}. ${locality.boundaryUncertain?'The corners do not all resolve to the same jurisdiction.':'All four selected corners resolved to the same city/county identifiers.'} Municipal boundary and planning authority still require confirmation if a record conflicts.`,kind:'geographic-reference'})};
+  locality.boundaryLookupIncomplete=responses.some(r=>!unpack(r));
+  locality.boundaryUncertain=responses.some(r=>!sameJurisdiction(locality,unpack(r)));
+  return {locality,evidence:source('jurisdiction','Geographic jurisdiction lookup','U.S. Census Bureau',responses[0].value,{text:`Selected-area center: ${locality.label}; county: ${locality.county}. ${locality.boundaryUncertain?(locality.boundaryLookupIncomplete?'One or more corner lookups could not be completed.':'The corners do not all resolve to the same jurisdiction.'):'All four selected corners resolved to the same municipality, active township/town and county identifiers.'} Census geography guides discovery; it does not establish exclusive planning authority, tribal jurisdiction or land ownership.`,kind:'geographic-reference'})};
 }
 
 export function suitableItem(item, kind, locality) {
   const title=plain(item.title);
   if (/draft|proposed|historical|archive|capacity|centroid|point|sample|test\b|copy|future|fire|school|parking zone/i.test(title)) return false;
-  if (kind==='parcel' && (!/parcel|cadastr|tax.?lot/i.test(title)||/farmland|preservation|conservation|easement|surplus|vacant|delinquent|foreclos/i.test(title))) return false;
-  if (kind==='zoning' && (!/zon(e|ing)/i.test(title)||/overlay|historic|shoreline|station|institution/i.test(title))) return false;
+  if (kind==='parcel' && (!/parcel|cadastr|tax.?lot|mappluto/i.test(title)||/farmland|preservation|conservation|easement|surplus|vacant|delinquent|foreclos|parcel groups|inundation|remediation|basemap|annotation|labels|mineral|\bplss\b|public land survey|survey grid|township grid/i.test(title))) return false;
+  if (kind==='zoning' && (!/zoning|land.?use.*zone|zone.*district/i.test(title)||/overlay|historic|shoreline|station|institution|hazard|evacuation|flood|tsunami|moisture|enterprise|trade zone|index/i.test(title))) return false;
   const years=title.match(/\b20\d{2}\b/g)??[];
   if (years.some(y=>Number(y)<new Date().getUTCFullYear()-2)) return false;
   if (!item.url || !isSourceUrl(item.url.replace(/^http:/,'https:'))) return false;
-  const nameTokens=[locality.city,locality.countyBase].filter(Boolean).map(canonical);
-  const description=canonical([item.title,item.description,item.snippet,item.accessInformation].join(' '));
+  const nameTokens=localityNames(locality).map(canonical);
+  const description=canonical([item.title,item.description,item.snippet,item.accessInformation,item.url,item.publisherName].join(' '));
   return nameTokens.some(name=>description.includes(name));
 }
 
-export async function discoverLayers(read, locality, points, kind) {
-  const names=[locality.city,locality.countyBase].filter(Boolean).map(n=>`"${cleanQuery(n)}"`).join(' OR ');
-  const term=kind==='parcel'?'(title:parcel OR title:parcels OR title:"tax lots")':'(title:zoning OR title:"land use zoning")';
+export async function discoverLayers(read, locality, points, kind, searchHint='',scope='local') {
+  const names=localityNames(locality).map(n=>`"${cleanQuery(n)}"`).join(' OR ');
+  const baseTerm=kind==='parcel'?'(title:parcel OR title:parcels OR title:"tax lots" OR title:cadastral OR title:MapPLUTO)':'(title:zoning OR title:"land use zoning")';
+  const term=searchHint?`(${baseTerm} OR title:"${cleanQuery(searchHint)}")`:baseTerm;
   const xs=points.map(p=>p.lng),ys=points.map(p=>p.lat);
-  const result=await read(makeUrl(`${arc}/search`,{f:'json',q:`(${names}) AND ${term} AND (type:"Feature Service" OR type:"Map Service")`,bbox:[Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)].join(','),num:'40',sortField:'numviews',sortOrder:'desc'}));
-  const candidates=(result.data.results??[]).filter(i=>suitableItem(i,kind,locality));
-  candidates.sort((a,b)=>Number(b.contentStatus==='public_authoritative')-Number(a.contentStatus==='public_authoritative') || (b.modified??0)-(a.modified??0));
-  const layers=[];
-  // A city name in a title is not enough: require authoritative publisher designation
-  // or a government-hosted service, and check its organization against this geography.
-  for (const item of candidates.slice(0,6)) {
-    if (layers.length>=3) break;
+  const bbox=[Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)].join(',');
+  const diagnostics={searches:0,failedSearches:0,candidates:0,checked:0,rejectedPublisher:0,failedServices:0,truncated:false,scope};
+  const summaries=[];
+  const search=async(q,start=1)=>{
+    diagnostics.searches++;
+    try {const r=await read(makeUrl(`${arc}/search`,{f:'json',q,bbox,num:'60',start:String(start),sortField:'numviews',sortOrder:'desc'}));summaries.push(...(r.data.results??[]));return r.data.nextStart;}
+    catch {diagnostics.failedSearches++;return -1;}
+  };
+  const type='(type:"Feature Service" OR type:"Map Service")';
+  const query=`(${names}) AND ${term} AND ${type}`;
+  const next=await search(query);
+  // Regional discovery lets the model recover from sparse naming/metadata and
+  // page past popular, non-applicable search results. Geometry is still queried.
+  if(scope==='regional'){
+    if(next>0)await search(query,next);
+    await search(`${term} AND ${type}`);
+  }else if(!summaries.length&&names)await search(`${term} AND ${type}`);
+  const connected=await Promise.all(catalogueConnections.filter(c=>c.kind===kind&&connectionMatches(c,locality)).map(async c=>{try{return {...(await read(`${arc}/content/items/${c.itemId}?f=json`)).data,connection:c};}catch{return null;}}));
+  const candidates=[...new Map([...summaries,...connected.filter(Boolean)].filter(i=>i.connection||suitableItem(i,kind,locality)).map(i=>[i.url.replace(/^http:/,'https:').replace(/\/$/,''),i])).values()];
+  const trustRank=i=>i.connection?4:verifiedProvider(i.url)?3:new URL(i.url).hostname.endsWith('.gov')?2:i.contentStatus==='public_authoritative'?1:0;
+  candidates.sort((a,b)=>trustRank(b)-trustRank(a) || (b.modified??0)-(a.modified??0));
+  diagnostics.candidates=candidates.length;
+  const layers=[],seenLayers=new Set(),limit=scope==='regional'?24:12;
+  const inspect=async candidate=>{
+    diagnostics.checked++;
     try {
+      let item=candidate;
+      if(item.id&&(!item.orgId||!item.contentStatus)){
+        try{item={...candidate,...(await read(`${arc}/content/items/${encodeURIComponent(item.id)}?f=json`)).data};}catch{}
+      }
       const url=item.url.replace(/^http:/,'https:').replace(/\/$/,'');
+      if(!isSourceUrl(url))return [];
+      const provider=verifiedProvider(url);
       const governmentHost=new URL(url).hostname.endsWith('.gov') || /\.(?:state\.[a-z]{2}|(?:co|ci)\.[a-z-]+\.[a-z]{2})\.us$/.test(new URL(url).hostname);
-      let publisher=plain(item.accessInformation)||'Government GIS publisher';
-      if (!governmentHost) {
-        if (item.contentStatus!=='public_authoritative' || !item.orgId) continue;
+      let publisher=provider?.publisher||plain(item.accessInformation)||'Government GIS publisher';
+      if (!governmentHost&&!provider&&!item.connection) {
+        if (item.contentStatus!=='public_authoritative' || !item.orgId){diagnostics.rejectedPublisher++;return [];}
         const org=await read(`${arc}/portals/${encodeURIComponent(item.orgId)}?f=json`);
         publisher=plain(org.data.name);
-        const matches=[locality.city,locality.countyBase].filter(Boolean).some(n=>canonical(publisher).includes(canonical(n)));
-        if (!matches || !/city|county|town|borough|government|municipal|planning|regional/i.test(publisher)) continue;
+        const matches=localityNames(locality).some(n=>canonical(publisher).includes(canonical(n)));
+        if (!matches || !/city|county|town|borough|government|municipal|planning|regional|state|geographic|gis|information|natural resources|revenue|assessor|commonwealth/i.test(publisher)){diagnostics.rejectedPublisher++;return [];}
       }
       const service=await read(`${url}?f=json`);
-      const options=service.data.fields ? [{url,meta:service.data}] : (service.data.layers??[]).filter(l=>!l.subLayerIds?.length).slice(0,8).map(l=>({url:`${url}/${l.id}`}));
-      for (const option of options) {
-        const meta=option.meta??(await read(`${option.url}?f=json`)).data;
-        if(meta.geometryType!=='esriGeometryPolygon'||!Array.isArray(meta.fields))continue;
-        const fields=meta.fields.filter(f=>/objectid|parcel|pin\b|apn|account|acct|address|situs|zone|zoning|district|land.?use|current.?use|unit|building|acre|sqft|area|ordinance|effective|chapter|code.?link/i.test(`${f.name} ${f.alias}`)).map(f=>f.name);
-        if (!fields.length) continue;
-        layers.push({url:option.url,meta,item,publisher,fields});
-        if(layers.length>=3)break;
+      const thematic=name=>kind==='parcel'?/parcel|cadastr|tax.?lot|mappluto/i.test(name):/zon(e|ing)|district/i.test(name);
+      // Service layer IDs may be sparse or nested. Rank the complete leaf list;
+      // never assume the relevant layer is among IDs 0 through 7.
+      const leaves=(service.data.layers??[]).filter(l=>!l.subLayerIds?.length).sort((a,b)=>Number(thematic(b.name))-Number(thematic(a.name)));
+      if(leaves.length>24)diagnostics.truncated=true;
+      const options=service.data.fields?[{url,meta:service.data}]:leaves.slice(0,24).map(l=>({url:`${url}/${l.id}`,name:l.name}));
+      const found=[];
+      for(let offset=0;offset<options.length&&found.length<3;offset+=4){
+        const results=await Promise.all(options.slice(offset,offset+4).map(async option=>{
+          try{
+            const meta=option.meta??(await read(`${option.url}?f=json`)).data;
+            if(meta.geometryType!=='esriGeometryPolygon'||!Array.isArray(meta.fields))return null;
+            const fields=meta.fields.filter(f=>!isPrivateRecordField(f)&&/objectid|parcel|pin\b|apn|(?:hcad|tax|property)_?(?:num|id)|account|acct|address|situs|zone|zoning|district|land.?use|current.?use|unit|building|acre|sqft|area|ordinance|effective|chapter|code.?link/i.test(`${f.name} ${f.alias}`)).map(f=>f.name);
+            const idField=findField(meta,kind==='parcel'?parcelIdPatterns:zoneIdPatterns);
+            if(!idField&&(option.name||meta.name)&&!thematic(option.name||meta.name))return null;
+            const identifierFields=meta.fields.filter(f=>!isPrivateRecordField(f)&&/^(esriFieldTypeString|esriFieldTypeInteger|esriFieldTypeDouble|esriFieldTypeSmallInteger)$/.test(f.type??'esriFieldTypeString')&&!/object.?id|global.?id|^fid$|^oid$|shape|geom|owner|mail|phone|email|address|acre|area|length|date|value|created|edited|subdivision|block|type|description|status|county|municipal|jurisdiction|name|^zone$|^section$|^plat$/i.test(f.name+' '+(f.alias??''))).slice(0,30).map(f=>({name:f.name,alias:f.alias??f.name}));
+            if(!idField&&(kind!=='parcel'||!identifierFields.length))return null;
+            if(idField&&!fields.includes(idField.name))fields.push(idField.name);
+            const addressField=findField(meta,[/^situs_?(addr|address)$/i,/^(?:prop_loc|st_address|parcel_addr)$/i,/^address$/i,/^full_?addr(ess)?$/i,/situs|address/i]);
+            if(addressField&&!isPrivateRecordField(addressField)&&!fields.includes(addressField.name))fields.push(addressField.name);
+            return {url:option.url,meta,item,publisher,fields,identifierFields,identifierField:idField?.name??null};
+          }catch{diagnostics.failedServices++;return null;}
+        }));
+        found.push(...results.filter(Boolean));
       }
-    } catch { /* Try another published candidate; never promote an unverified mirror. */ }
+      return found.slice(0,3);
+    } catch {diagnostics.failedServices++;return [];}
+  };
+  for(let offset=0;offset<Math.min(candidates.length,limit)&&layers.length<6;offset+=4){
+    const groups=await Promise.all(candidates.slice(offset,Math.min(offset+4,limit)).map(inspect));
+    for(const layer of groups.flat())if(!seenLayers.has(layer.url)&&layers.length<6){layers.push(layer);seenLayers.add(layer.url);}
   }
+  diagnostics.truncated ||= diagnostics.checked<candidates.length || next>0&&scope!=='regional';
+  Object.defineProperty(layers,'diagnostics',{value:diagnostics});
   return layers;
 }
 
 function findField(meta, patterns) {
-  for(const pattern of patterns) {const f=meta.fields.find(f=>pattern.test(f.name)||pattern.test(f.alias??'')); if(f)return f;}
+  for(const pattern of patterns) {const f=meta.fields.find(f=>!isPrivateRecordField(f)&&(pattern.test(f.name)||pattern.test(f.alias??''))); if(f)return f;}
   return null;
 }
 function valueOf(meta, attrs, field) {
@@ -94,13 +142,17 @@ function valueOf(meta, attrs, field) {
   if(raw===null||raw===undefined||String(raw).trim()==='')return null;
   return String(field.domain?.codedValues?.find(c=>String(c.code)===String(raw))?.name??raw).slice(0,240);
 }
-export async function readSpatial(read,layers,geometry,kind) {
+export async function readSpatial(read,layers,geometry,kind,diagnostics={}) {
+  diagnostics.completedQueries=0;diagnostics.failedQueries=0;diagnostics.unsupportedQueries=0;
   for (const layer of layers) {
     try {
-      const response=await queryFeatures(read,layer.url,ringsOf(geometry),layer.fields.join(','));
-      const idField=findField(layer.meta,kind==='parcel'?[/^parcel_?(id|num|number)$/i,/^pin$/i,/^apn$/i,/^acct_no$/i,/^(taxlot|taxlot_id|parcelid)$/i,/parcel|account|tax.?lot/i]:[/^zoning$/i,/^zone_code$/i,/^zoning_?code$/i,/^zoning_ztype$/i,/^base_zone$/i,/^zoning_base$/i,/^zone$/i,/^zone_?class$/i,/^district$/i]);
-      if(!idField)continue;
-      const address=findField(layer.meta,[/^situs_addr$/i,/^address$/i,/^full_?addr(ess)?$/i,/situs|address/i]);
+      const chosen=layer.identifierField?layer.meta.fields.find(f=>f.name===layer.identifierField):null;
+      const requestFields=[...new Set([...layer.fields,...(chosen?[chosen.name]:[])])].filter(name=>!isPrivateRecordField(layer.meta.fields.find(f=>f.name===name)??name));
+      const response=await queryFeatures(read,layer.url,ringsOf(geometry),requestFields.join(','));
+      diagnostics.completedQueries++;
+      const idField=chosen??findField(layer.meta,kind==='parcel'?parcelIdPatterns:zoneIdPatterns);
+      if(!idField){diagnostics.unsupportedQueries++;continue;}
+      const address=findField(layer.meta,[/^situs_?(addr|address)$/i,/^(?:prop_loc|st_address|parcel_addr)$/i,/^address$/i,/^full_?addr(ess)?$/i,/situs|address/i]);
       const description=findField(layer.meta,[/^zone_description$/i,/^zon(?:e|ing)_?desc$/i,/zoning.*description|district.*name/i]);
       const merged=new Map();
       for(const feature of response.data.features) {
@@ -109,7 +161,7 @@ export async function readSpatial(read,layers,geometry,kind) {
         const shape=fromRings(feature.geometry.rings), overlap=overlapArea(shape,geometry);
         if(overlap<0.5)continue;
         const existing=merged.get(id);
-        const attributes=Object.fromEntries(Object.entries(feature.attributes).filter(([k,v])=>v!==null&&!/owner|mail|phone|email/i.test(k)).map(([k,v])=>[k,String(v).slice(0,240)]));
+        const attributes=Object.fromEntries(Object.entries(feature.attributes).filter(([k,v])=>v!==null&&requestFields.includes(k)&&!isPrivateRecordField(layer.meta.fields.find(f=>f.name===k)??k)).map(([k,v])=>[k,String(v).slice(0,240)]));
         merged.set(id,{id,key:digest(`${layer.item.id}:${id}`).slice(0,20),address:valueOf(layer.meta,feature.attributes,address),description:valueOf(layer.meta,feature.attributes,description)??(kind==='zoning'?valueOf(layer.meta,feature.attributes,idField):null),geometry:existing?union([existing.geometry,shape]):shape,attributes});
       }
       const records=[...merged.values()].map(r=>({...r,overlapSquareMeters:overlapArea(r.geometry,geometry),mappedSquareMeters:multiArea(r.geometry)})).sort((a,b)=>b.overlapSquareMeters-a.overlapSquareMeters);
@@ -123,7 +175,7 @@ export async function readSpatial(read,layers,geometry,kind) {
         kind:'mapped-record',
       });
       return {records,evidence};
-    } catch { /* A truncated, invalid, or failed layer is not a verified empty result. */ }
+    } catch { diagnostics.failedQueries++; /* A failed query is not a verified empty result. */ }
   }
   return null;
 }
@@ -152,22 +204,52 @@ export async function housingContext(read,locality) {
   };
 }
 
-export async function municipalCode(read,locality,zones) {
+// Rank provisions by their relevance to a housing site, not by generic words
+// such as "prohibited" (which also match parking tickets and street conduct).
+export function provisionRank(title) {
+  if (/metered|parking meter|overtime|feeding meters|parking for (?:certain|rental)|prohibited activities|commercial vehicles|large vehicles|yard parking|penalt|fee schedule/i.test(title)) return 0;
+  let score=0;
+  if (/permitted uses|prohibited uses|allowable uses|use table|use regulations|land use requirements/i.test(title)) score=14;
+  else if (/building line requirement|minimum lot|lot size|minimum width of a lot|development plat required|parking spaces for.*use classifications/i.test(title)) score=12;
+  else if (/development standards|off.street parking|parking requirements|density|setbacks|lot coverage|residential.*(?:standards|development)/i.test(title)) score=9;
+  else if (/height|affordable|development plat|floodplain.*(?:development|construction)|development.*floodplain|site plan submittal/i.test(title)) score=6;
+  if(score&&/exception|optional|special|additional|reduc|conflict|revocation/i.test(title))score-=3;
+  return score;
+}
+const provisionTopic=title=>/building line|setback/i.test(title)?'setback':/lot size|minimum lot|width of a lot/i.test(title)?'lot':/development plat/i.test(title)?'plat':title;
+export function provisionPaths(tree, scopes, fallback=[]) {
+  const indexed=new Map();
+  const index=(node,parents=[])=>{indexed.set(node.Id,{node,parents});for(const child of node.Children??[])index(child,[...parents,node]);};index(tree);
+  const groups=[];
+  for(const scope of scopes){
+    const entry=indexed.get(scope.id);if(!entry)continue;
+    // Some official chapter links point to a section inside the chapter.
+    // Resolve the actual ancestor from the publisher's TOC, never guess its ID.
+    const root=/chapter/i.test(scope.label??'')?[...entry.parents,entry.node].reverse().find(n=>/chapter/i.test(n.Heading??n.Title??''))??entry.node:entry.node;
+    const sections=[];
+    const collect=node=>{const score=provisionRank(node.Heading??node.Title??'');if(score&&!node.Children?.length)sections.push({id:node.Id,score,topic:provisionTopic(node.Heading??node.Title??'')});for(const child of node.Children??[])collect(child);};collect(root);
+    sections.sort((a,b)=>b.score-a.score);const topics=new Set(),first=[],rest=[];for(const section of sections){(topics.has(section.topic)?rest:first).push(section);topics.add(section.topic);}if(sections.length)groups.push([...first,...rest]);
+  }
+  // Retain coverage across relevant chapters rather than letting one chapter
+  // consume the entire evidence budget.
+  const ids=new Set();
+  for(let round=0;round<3&&ids.size<8;round++)for(const group of groups){if(group[round]&&ids.size<8)ids.add(group[round].id);}
+  if(!ids.size)return [...fallback].slice(0,6);
+  return [...ids];
+}
+
+export async function municipalCode(read,locality,zones,planning={codeLinks:[]}) {
   if(!locality.stateAbbr||locality.boundaryUncertain)return null;
-  const clients=(await read(makeUrl(`${muni}/Clients/stateAbbr`,{stateAbbr:locality.stateAbbr}),{ttl:86400000})).data;
-  if(!Array.isArray(clients))return null;
-  const wanted=canonical(locality.city||locality.county);
-  const matches=clients.filter(c=>canonical(c.ClientName)===wanted && c.State?.StateAbbreviation===locality.stateAbbr);
-  if(matches.length!==1)return null;
-  const client=matches[0];
+  const client=await municipalClient(read,locality);
+  if(!client)return null;
   const products=(await read(`${muni}/Products/clientId/${client.ClientID}`)).data;
   const selected=products.filter(p=>p.ContentType?.Id==='CODES').sort((a,b)=>Number(/zoning|land development|unified development/i.test(b.ProductName))-Number(/zoning|land development|unified development/i.test(a.ProductName))).slice(0,2);
   const zoneNames=zones.map(z=>cleanQuery(z.id)).filter(Boolean).slice(0,2);
   const searchTerms=zoneNames.length?zoneNames.map(z=>`"${z}" residential`):['residential housing zoning'];
   const allHits=[];
   for(const term of searchTerms) {
-    const search=await read(makeUrl('https://library.municode.com/localapi/search',{clientId:String(client.ClientID),searchText:term,contentTypeId:'CODES',mode:'CLIENTMODE',pageNum:'1',pageSize:'20',fragmentSize:'200',sort:'0',isAdvanced:'false',isAutocomplete:'false',titlesOnly:'false'}));
-    allHits.push(...(search.data.hits??[]));
+    const search=await settle(read(makeUrl('https://library.municode.com/localapi/search',{clientId:String(client.ClientID),searchText:term,contentTypeId:'CODES',mode:'CLIENTMODE',pageNum:'1',pageSize:'20',fragmentSize:'200',sort:'0',isAdvanced:'false',isAutocomplete:'false',titlesOnly:'false'})));
+    if(search.ok)allHits.push(...(search.value.data.hits??[]));
   }
   const allowedProductIds=new Set(selected.map(p=>String(p.ProductID)));
   const hits=[...new Map(allHits.filter(h=>allowedProductIds.has(String(h.product?.id))).map(h=>[h.nodeId,h])).values()];
@@ -189,30 +271,21 @@ export async function municipalCode(read,locality,zones) {
     if(!job?.Id||job.ProductId!==product.ProductID)continue;
     const productHits=pick.filter(h=>String(h.product.id)===String(product.ProductID));
     let paths=new Set(productHits.map(h=>h.nodeId));
-    const directPaths=new Set();
-    for(const zone of zones)for(const value of Object.values(zone.attributes??{})){
-      try{const url=new URL(value);const parts=url.pathname.split('/');if(url.hostname==='library.municode.com'&&parts[1]?.toLowerCase()===locality.stateAbbr.toLowerCase()&&canonical(decodeURIComponent(parts[2]))===canonical(client.ClientName)&&canonical(decodeURIComponent(parts[4]??''))===canonical(product.ProductName)&&url.searchParams.has('nodeId'))directPaths.add(url.searchParams.get('nodeId'));}catch{}
+    const directPaths=new Map();
+    const publishedLinks=[...zones.flatMap(zone=>Object.values(zone.attributes??{})),...(planning.codeLinks??[]).map(link=>link.url)];
+    for(const value of publishedLinks){
+      try{const url=new URL(value);const parts=url.pathname.split('/');if(url.hostname==='library.municode.com'&&parts[1]?.toLowerCase()===locality.stateAbbr.toLowerCase()&&canonical(decodeURIComponent(parts[2]))===canonical(client.ClientName)&&canonical(decodeURIComponent(parts[4]??''))===canonical(product.ProductName)&&url.searchParams.has('nodeId'))directPaths.set(url.searchParams.get('nodeId'),(planning.codeLinks??[]).find(link=>link.url===value)?.label??'');}catch{}
     }
-    if(directPaths.size)paths=directPaths;
+    if(directPaths.size)paths=new Set(directPaths.keys());
     if(!paths.size)continue;
     // Public TOC lookup supplies exact node identifiers; no invented chapter URL.
     try {
       const tree=(await read(makeUrl(`${muni}/codesToc/fullTree`,{productId:String(product.ProductID),jobId:String(job.Id)}),{maxBytes:5_000_000})).data;
-      const walk=node=>{
-        const ancestors=directPaths.size?[...directPaths]:productHits.flatMap(h=>(h.ancestors??[]).filter(a=>/chapter/i.test(a.title)).map(a=>a.nodeId));
-        const sections=[];
-        const inspect=(n,inChapter=false)=>{
-          const active=inChapter||ancestors.includes(n.Id);
-          const title=n.Heading??n.Title??'';
-          if(active && /permitted|prohibited|allowable|use table|land use requirements|development standards|density|height|setbacks|lot coverage/i.test(title))sections.push({id:n.Id,priority:/permitted|prohibited|allowable|use table|land use requirements/i.test(title)?2:1});
-          for(const child of n.Children??[])inspect(child,active);
-        };inspect(node);
-        sections.sort((a,b)=>b.priority-a.priority);
-        if(directPaths.size&&sections.length)paths=new Set(sections.slice(0,6).map(s=>s.id));
-        else for(const s of sections){if(paths.size<6)paths.add(s.id);}
-      };walk(tree);
+      const scopes=directPaths.size?[...directPaths].map(([id,label])=>({id,label})):productHits.flatMap(h=>(h.ancestors??[]).filter(a=>/chapter/i.test(a.title)).map(a=>({id:a.nodeId,label:a.title})));
+      const chosen=provisionPaths(tree,scopes,paths);
+      paths=new Set(directPaths.size?chosen:[...paths,...chosen].slice(0,6));
     } catch { /* Search-derived sections remain available; completeness stays unresolved. */ }
-    const responses=await Promise.all([...paths].slice(0,6).map(node=>settle(read(makeUrl(`${muni}/CodesContent`,{productId:String(product.ProductID),jobId:String(job.Id),nodeId:node,groupChunks:'false'})))));
+    const responses=await Promise.all([...paths].slice(0,8).map(node=>settle(read(makeUrl(`${muni}/CodesContent`,{productId:String(product.ProductID),jobId:String(job.Id),nodeId:node,groupChunks:'false'})))));
     for(const result of responses) {
       if(!result.ok)continue;
       const docs=(result.value.data.Docs??[]).sort((a,b)=>Number(/permitted|prohibited|use regulations|development standards/i.test(b.Title))-Number(/permitted|prohibited|use regulations|development standards/i.test(a.Title)));
@@ -262,29 +335,34 @@ export function createRecordsService({fetchImpl=fetch,now=Date.now,timeoutMs}={}
       }
       result.locality=located.locality; result.sources.push(located.evidence);
       result.checks.push({name:'Jurisdiction',status:located.locality.boundaryUncertain?'needs-review':'retrieved'});
-      if(result.locality.boundaryUncertain)gap('boundary','This selection crosses a jurisdiction boundary','The selected corners resolve to different city or county identifiers. One authority’s rules cannot be applied to the whole area.','Adjust the area or confirm the relevant planning authority before interpreting the rules.');
-      const [parcelLayers,zoningLayers,housing]=await Promise.all([
+      if(result.locality.boundaryUncertain)gap('boundary','The planning authority needs confirming',result.locality.boundaryLookupIncomplete?'One or more corner lookups failed. The center locality is available, but the authority for the whole outline could not be confirmed.':'The selected corners resolve to different city or county identifiers. One authority’s rules cannot be applied to the whole area.','Adjust the area or confirm the relevant planning authority before interpreting the rules.');
+      const [parcelLayers,zoningLayers,housing,planning]=await Promise.all([
         settle(discoverLayers(read,result.locality,input.points,'parcel')),
         settle(discoverLayers(read,result.locality,input.points,'zoning')),
         settle(housingContext(read,result.locality)),
+        settle(planningContext(read,result.locality)),
       ]);
+      result.planningSystem=planning.ok?planning.value:{type:'unresolved',sources:[],codeLinks:[]};
+      result.sources.push(...result.planningSystem.sources);
       if(housing.ok){result.housing={...housing.value};delete result.housing.evidence;result.sources.push(housing.value.evidence);}
       else gap('housing','Local housing estimates were not available','No housing demand or affordable rent has been inferred from the map.','Retry the statistics source or consult the local housing-needs assessment.');
       result.checks.push({name:'Housing context',status:housing.ok?'retrieved':'unavailable'});
-      const parcels=parcelLayers.ok?await readSpatial(read,parcelLayers.value,selected,'parcel'):null;
+      const parcelDiagnostics={};
+      const parcels=parcelLayers.ok?await readSpatial(read,parcelLayers.value,selected,'parcel',parcelDiagnostics):null;
+      const parcelLookupStatus=parcels?'retrieved':!parcelLayers.ok||(!parcelDiagnostics.completedQueries&&parcelDiagnostics.failedQueries)?'source-error':!parcelLayers.value.length?'no-supported-source':parcelDiagnostics.unsupportedQueries===parcelDiagnostics.completedQueries?'unsupported-record-format':'no-match';
       if(parcels) {
         result.sources.push(parcels.evidence);
         result.parcelCandidates=parcels.records.slice(0,20);
         if(input.parcelKey){result.parcel=parcels.records.find(p=>p.key===input.parcelKey)??null;if(!result.parcel)gap('selection','The previous parcel match is no longer available','Records or the selected area changed.','Choose a parcel from the current results.');}
         else if(parcels.records.length===1)result.parcel=parcels.records[0];
         if(!result.parcel){result.status='needs-parcel';gap('parcel-match','More than one parcel intersects your selection','Select the parcel to research. Their development capacity has not been combined.','Choose a parcel below or adjust the outline.');}
-      } else gap('parcel','A reliable parcel match was not found','The public catalogue did not provide a usable, authoritative parcel polygon for this selection. The blue outline remains an exploration area.','Check the outline or obtain the parcel record from the local assessor.');
-      result.checks.push({name:'Parcel',status:result.parcel?'retrieved':parcels?'needs-review':'unavailable'});
+      } else gap('parcel',parcelLookupStatus==='source-error'?'The parcel source could not be reached':'A reliable parcel match was not found',parcelLookupStatus==='source-error'?'The connected parcel lookup failed. This is a source failure, not evidence that no parcel exists.':parcelLookupStatus==='unsupported-record-format'?'A public layer was found, but its parcel identifier could not be interpreted reliably. The record format needs adapter support.':parcelLookupStatus==='no-match'?'The queried public layers did not return a usable parcel polygon intersecting this outline. The blue outline remains an exploration area.':'No supported authoritative parcel layer was discovered for this selection. A local record may still exist outside the connected sources.','Retry the lookup, check the outline, or obtain the parcel record from the local assessor.');
+      result.checks.push({name:'Parcel',status:result.parcel?'retrieved':parcels?'needs-review':parcelLookupStatus});
       const target=result.parcel?.geometry??selected;
       const zoning=zoningLayers.ok?await readSpatial(read,zoningLayers.value,target,'zoning'):null;
       if(zoning){result.zones=zoning.records;result.sources.push(zoning.evidence);}
-      else gap('zoning','The applicable zoning district is unresolved','No authoritative zoning polygon could be matched. This does not mean housing is allowed, prohibited, or that the locality has no zoning.','Confirm the land-use designation with the planning authority.');
-      result.checks.push({name:'Zoning map',status:zoning?'retrieved':'unavailable'});
+      else if(result.planningSystem.type!=='no-zoning')gap('zoning','The applicable planning controls are not fully established','A zoning polygon could not be matched, and no official statement establishing an alternative planning system was found. Retrieved local provisions can still be reviewed separately.','Confirm the local planning controls and their application to this property.');
+      result.checks.push({name:'Planning system',status:result.planningSystem.type==='no-zoning'?'no-zoning-confirmed':zoning?'zoning-map-retrieved':'unresolved'});
       if(result.zones.length>1)gap('split-zoning','More than one zoning district intersects the site','A single district’s rules cannot safely be applied across this site.','Ask the planning authority which provisions apply to the intended housing area.');
       if(zoning){
         const coverage=overlapArea(union(result.zones.map(z=>z.geometry)),target)/multiArea(target);
@@ -294,16 +372,17 @@ export function createRecordsService({fetchImpl=fetch,now=Date.now,timeoutMs}={}
         if(flags.length)gap('map-conditions','The zoning record flags additional conditions',flags.join('; ')+'. The effect of these mapped flags has not been resolved.','Check the related overlay, historic or contract provisions with planning staff.');
       }
       if(result.status!=='needs-parcel') {
-        const code=await settle(municipalCode(read,result.locality,result.zones));
+        const code=await settle(municipalCode(read,result.locality,result.zones,result.planningSystem));
         if(code.ok&&code.value){result.code=code.value.evidence.map(e=>e.id);result.sources.push(...code.value.evidence);}
       }
       result.checks.push({name:'Published code',status:result.code.length?'retrieved':'unavailable'});
       if(!result.code.length)gap('code','The governing provisions have not been retrieved','The connected code publisher did not return usable provisions for this jurisdiction and district. A zoning label alone does not establish permission.','Review the authority’s published code before deciding which housing route to explore.');
-      else gap('applicability','Confirm the approval route and site-specific conditions','The retrieved sections are candidates for this district. Uncodified amendments, special overlays and exceptions have not been exhaustively checked.','Confirm the applicable sections and approvals with the local planning authority.');
+      else gap('applicability','Confirm the approval route and site-specific conditions','The retrieved local provisions are not a complete site review. Uncodified amendments, special controls and exceptions have not been exhaustively checked.','Confirm the applicable sections and approvals with the local planning authority.');
       gap('capacity','A reliable home count needs more site evidence','Access, lot-edge classification, existing development, easements, environmental constraints and service capacity have not all been established.','Use a site plan and the relevant records to resolve these checks before calculating capacity.');
       gap('affordability','Affordable delivery is not established by zoning','Ownership/control, intended affordability commitments and funding have not been verified.','Explore an appropriate housing partnership and affordability conditions using the church’s stated priorities.');
       result.checks.push({name:'Environmental, access and title checks',status:'not-established'});
-      if(result.code.length&&result.parcel&&!result.locality.boundaryUncertain&&result.zones.length===1&&result.zoningCoverage>=0.98)result.status='preliminary';
+      if(result.code.length&&result.parcel&&!result.locality.boundaryUncertain&&((result.zones.length===1&&result.zoningCoverage>=0.98)||result.planningSystem.type==='no-zoning'))result.status='preliminary';
+      result.assessmentScope=result.status==='preliminary'?'matched-site':'local-rules';
       const gapOrder=['boundary','parcel-match','selection','parcel','zoning','zoning-coverage','split-zoning','map-conditions','code','applicability','capacity','housing','affordability'];
       result.gaps.sort((a,b)=>gapOrder.indexOf(a.id)-gapOrder.indexOf(b.id));
       result.caseId=digest({key,sources:result.sources.map(s=>s.hash)}).slice(0,20);

@@ -48,15 +48,18 @@ export function renderFindings(container,result,{onParcel}={}){
   const label=result.locality?.label??'Location unresolved';
   const meta=el('p',`${label} · ${date(result.generatedAt)}`,'findings-location');container.append(meta);
   let headline=result.assessment?.headline,summary=result.assessment?.summary;
+  if(result.assessment&&result.assessmentScope==='local-rules')headline=result.parcel?'Local rules found; site applicability needs checking.':'Local rules found; the parcel still needs matching.';
+  if(result.researchError==='local-call-limit'){headline='Property research is paused.';summary='The local Gloo call budget was reached. This does not mean public records are missing. Your area and priorities are saved.';}
   if(!headline){
     if(result.status==='needs-parcel'){headline='First, confirm the parcel.';summary='Your outline overlaps more than one property record. Choose the parcel you want to explore.';}
     else if(result.status==='unavailable'){headline='The local records could not be established.';summary='No housing permission or capacity has been inferred for this area.';}
-    else if(result.locality?.boundaryUncertain){headline='The planning authority needs confirming.';summary='The selected area crosses a mapped jurisdiction boundary. One authority’s rules cannot be applied to the whole site.';}
+    else if(result.locality?.boundaryUncertain){headline='The planning authority needs confirming.';summary=result.locality.boundaryLookupIncomplete?'The location is known, but a corner lookup failed. The authority for the whole area remains unconfirmed.':'The selected area crosses a mapped jurisdiction boundary. One authority’s rules cannot be applied to the whole site.';}
     else if(result.zones.length>1){headline='This site crosses zoning districts.';summary='We found different zoning designations across the mapped site. Confirm which rules govern the housing area before comparing possibilities.';}
-    else if(result.code.length){headline='The property records are ready to review.';summary='Published provisions have been retrieved. Their application to the site still needs interpretation and confirmation.';}
+    else if(result.planningSystem?.type==='no-zoning'){headline=result.parcel?'Development rules apply here.':'Local development rules found; parcel matching is incomplete.';summary='The municipality confirms it has no zoning. Its development regulations still apply; no building approval has been established.';}
+    else if(result.code.length){headline=result.parcel?'Local provisions found; the housing route needs review.':'Local rules found; the parcel still needs matching.';summary='Published provisions are available. Their application to this property has not been established.';}
     else {headline='There is more to check before a housing assessment.';summary=result.parcel?'We found a parcel record, but the governing housing provisions remain unresolved.':'The available records do not yet establish a reliable parcel and housing route.';}
   }
-  container.append(el('p',result.narrativeStatus==='ready'?'Preliminary assessment':'Public-record findings','findings-kicker'),el('h3',headline,'findings-answer'),el('p',summary,'findings-answer-text'));
+  container.append(el('p',result.narrativeStatus==='ready'?(result.assessmentScope==='local-rules'?'Local rules · property checks incomplete':'Preliminary assessment'):'Available findings · checks remain','findings-kicker'),el('h3',headline,'findings-answer'),el('p',summary,'findings-answer-text'));
   if(result.assessment?.support?.length){const cited=el('div',undefined,'assessment-sources');support(cited,result.assessment.support,result.sources);container.append(cited);}
   if(result.status==='needs-parcel'){
     const choices=el('div',undefined,'parcel-choices');
@@ -72,8 +75,10 @@ export function renderFindings(container,result,{onParcel}={}){
   property.body.append(el('p','Ownership, vacancy and authority to use the land have not been verified.'));
   for(const id of ['parcel','jurisdiction']){const s=result.sources.find(s=>s.id===id);if(s)property.body.append(sourceDetail(s));}
   rows.append(property.details);
-  const zoning=finding('What the rules say',result.findings?.[0]?.summary??(result.zones.length?`The mapped district${result.zones.length>1?'s are':' is'} ${result.zones.map(z=>z.id).join(', ')}. ${result.code.length?'Published code sections are available below.':'Housing permission still needs checking against the code.'}`:'No applicable zoning district has been established.'));
+  const zoning=finding('What the rules say',result.findings?.[0]?.summary??(result.planningSystem?.type==='no-zoning'?'The municipality confirms it has no zoning. Development regulations still govern the site.':result.zones.length?`The mapped district${result.zones.length>1?'s are':' is'} ${result.zones.map(z=>z.id).join(', ')}. ${result.code.length?'Published code sections are available below.':'Housing permission still needs checking against the code.'}`:'The local planning controls have not yet been fully established.'));
+  const planningSource=result.sources.find(s=>s.id==='planning-system');if(planningSource)zoning.body.append(sourceDetail(planningSource,planningSource.statement));
   for(const item of result.findings??[]){zoning.body.append(el('h4',item.heading),el('p',item.summary));support(zoning.body,item.support,result.sources);}
+  for(const issue of result.codeAccess??[]){const note=el('p','The published code could not be retrieved automatically. '),link=el('a','Open the publisher’s code ↗');link.href=issue.url;link.target='_blank';link.rel='noopener noreferrer';note.append(link);zoning.body.append(note);}
   const mapSource=result.sources.find(s=>s.id==='zoning');if(mapSource)zoning.body.append(sourceDetail(mapSource));
   if(result.code.length){const sections=el('details',undefined,'code-sections');sections.append(el('summary',`${result.code.length} retrieved code sections`));for(const s of result.sources.filter(s=>s.kind==='code-provision'))sections.append(sourceDetail(s));zoning.body.append(sections);}
   zoning.body.append(el('p','A district label is not permission to build. Special conditions, later amendments and approvals may change the route.'));
@@ -93,5 +98,5 @@ export function renderFindings(container,result,{onParcel}={}){
   for(const item of result.gaps.slice(1)){remaining.append(el('h4',item.title),el('p',item.detail),el('p',item.next,'finding-next-check'));}
   const checks=el('ul',undefined,'evidence-checks');for(const check of result.checks)checks.append(el('li',`${check.name}: ${check.status.replaceAll('-',' ')}`));remaining.append(checks);container.append(remaining);
   if(result.narrativeMessage)container.append(el('p',result.narrativeMessage,'findings-attribution'));
-  container.append(el('p',`${result.narrativeStatus==='ready'?'Code interpretation prepared with Gloo AI. ':''}Preliminary research for discussion. Home count, buildability and financial feasibility have not been established.`, 'findings-attribution'));
+  container.append(el('p',`${result.narrativeStatus==='ready'?'Researched and interpreted with Gloo AI. ':''}Preliminary research for discussion. Home count, buildability and financial feasibility have not been established.`, 'findings-attribution'));
 }

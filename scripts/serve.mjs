@@ -5,7 +5,7 @@ import { readFile, stat, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve, relative, extname, isAbsolute, sep } from 'node:path';
 
-const publicFiles = new Set(['/', '/index.html', '/app.js', '/styles.css', '/land.js', '/land.css', '/geometry.js', '/findings.js']);
+const publicFiles = new Set(['/', '/index.html', '/app.js', '/styles.css', '/land.js', '/land.css', '/geometry.js', '/findings.js', '/input-privacy.js']);
 const types = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.svg':'image/svg+xml', '.webp':'image/webp', '.png':'image/png', '.mp4':'video/mp4', '.ttf':'font/ttf', '.woff2':'font/woff2', '.json':'application/json' };
 
 async function readAppConfig(root, environment) {
@@ -39,7 +39,7 @@ export async function createAppServer(directory = fileURLToPath(new URL('../', i
   // This is a browser API key. Only the two public Maps settings are exposed.
   const config = await readAppConfig(root, environment);
   const mapsConfig = JSON.stringify(config.maps);
-  const review = createFindingsService(config.gloo);
+  const review = createFindingsService({...config.gloo, onDiagnostic: event => {if (event.type === 'agent-completed') console.info(JSON.stringify(event)); else if (event.type === 'invalid-assessment') console.warn('Gloo assessment rejected:', event.reason);}});
   return createServer(async (request, response) => {
     const fail = (status, message) => {
       response.writeHead(status, { 'Content-Type':'text/plain; charset=utf-8', 'X-Content-Type-Options':'nosniff' });

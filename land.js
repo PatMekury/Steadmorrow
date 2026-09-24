@@ -1,3 +1,4 @@
+import { privateInputFields, hasPrivateInput, screenedLandSave, privacyMessage, addressPrivacyMessage } from './input-privacy.js';
 import { validatePolygon, areaSquareMeters, polygonCenter } from './geometry.js';
 import { renderFindings } from './findings.js';
 
@@ -10,17 +11,23 @@ const priorityChoices = ['Retain ownership', 'Understand local housing needs'];
 let priorities = { purpose: '', preserve: '', exploring: false, choices: [], saved: false };
 let mapView;
 let findingsOpen = false, findingsController, findingsSequence = 0, lastFindings = null;
-let parcelKey = null, parcelShape = '', evidenceRequest = null;
+let parcelKey = null, parcelShape = '';
 let points = [], undoStack = [], mode = 'polygon', confirmed = false;
 let map, polygon, line, AdvancedMarkerElement, markers = [];
 let started = false, ready = false, searchSequence = 0, queryLabel = '', matchedLabel = '';
 let pendingQuery = '', pendingMatched = '', pendingLocation = null;
+let privacySaveNotice = false;
 let storageAvailable = true, dragging = false, keyboardActive = false;
 let suggestionTimer, autocompleteSession = null, activeSuggestion = -1, composing = false;
 
 function restore() {
   try {
-    const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+    const original = JSON.parse(localStorage.getItem(storageKey) || 'null');
+    if (!original || original.version !== 1) return;
+    privacySaveNotice = privateInputFields(original).length > 0;
+    const saved = screenedLandSave(original);
+    // Clean legacy sensitive values before rendering or any external request.
+    if (privacySaveNotice) localStorage.setItem(storageKey, JSON.stringify(saved));
     if (!saved || saved.version !== 1 || !Array.isArray(saved.points) || saved.points.length > 4) return;
     if (!saved.points.every(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng) && Math.abs(p.lat) <= 85 && Math.abs(p.lng) <= 180)) return;
     points = copy(saved.points);
@@ -48,11 +55,11 @@ function restore() {
 function persist() {
   try {
     // Save only user input and user-drawn geometry, not Google Places results.
-    localStorage.setItem(storageKey, JSON.stringify({ version: 1, points, mode, confirmed, query: queryLabel, priorities }));
+    localStorage.setItem(storageKey, JSON.stringify(screenedLandSave({ points, mode, confirmed, query: queryLabel, priorities })));
     storageAvailable = true;
   } catch { storageAvailable = false; }
   $('save-status').textContent = storageAvailable
-    ? 'Saved in this browser.'
+    ? privateInputFields({query: queryLabel, priorities}).length ? 'Selection saved. Flagged text has not been saved.' : privacySaveNotice ? 'Flagged text was removed from the saved draft. Your selection is kept.' : 'Saved in this browser.'
     : 'Kept for this visit. Browser storage is unavailable; refreshing will lose your work.';
 }
 
@@ -306,7 +313,7 @@ async function choosePlace(match, query, requestSequence) {
     pendingQuery = query;
     pendingLocation = literal(place.location);
     $('property-query').value = pendingMatched;
-    if (!points.length) queryLabel = query;
+    if (!points.length) queryLabel = hasPrivateInput(query, {address: true}) ? '' : query;
     map.setCenter(place.location);
     map.setZoom(18);
     $('mode-' + mode).focus({ preventScroll: true });
@@ -348,6 +355,7 @@ function showSuggestions(matches, query, sequence) {
 }
 
 async function suggest(query, sequence) {
+  if (hasPrivateInput(query, {address: true})) return;
   try {
     const { AutocompleteSuggestion, AutocompleteSessionToken } = await google.maps.importLibrary('places');
     if (sequence !== searchSequence || !ready) return;
@@ -369,6 +377,7 @@ async function suggest(query, sequence) {
 
 function queueSuggestions() {
   const query = $('property-query').value.trim();
+  if (hasPrivateInput(query, {address: true})) { $('search-status').textContent = addressPrivacyMessage; return; }
   if (!ready || query.length < 2 || composing) return;
   const sequence = searchSequence;
   suggestionTimer = setTimeout(() => { void suggest(query, sequence); }, 200);
@@ -378,6 +387,7 @@ async function search(event) {
   event.preventDefault();
   if (composing) return;
   const query = $('property-query').value.trim();
+  if (hasPrivateInput(query, {address: true})) { dismissSearch({endSession: true}); $('search-status').textContent = addressPrivacyMessage; return; }
   if (!query || !ready) return;
   const option = $('result-list').children[activeSuggestion];
   if (option && !$('search-results').hidden) { option.click(); return; }
@@ -406,7 +416,7 @@ function queryChanged(event) {
   const query = $('property-query').value.trim();
   if (!query) autocompleteSession = null;
   if (query !== pendingQuery) { pendingQuery = ''; pendingMatched = ''; pendingLocation = null; }
-  if (!points.length) queryLabel = query;
+  if (!points.length) queryLabel = hasPrivateInput(query, {address: true}) ? '' : query;
   render(); persist();
   if (!event?.isComposing && !composing) queueSuggestions();
 }
@@ -476,12 +486,27 @@ function renderPriorities() {
   }));
 }
 
+function validatePriorityPrivacy(focus = false) {
+  const fields = privateInputFields({query: queryLabel, priorities});
+  for (const [field, id] of [['purpose', 'priority-purpose'], ['matters', 'priority-preserve']]) {
+    const invalid = fields.includes(field);
+    $(id).setCustomValidity(invalid ? privacyMessage : '');
+    $(id).setAttribute('aria-invalid', String(invalid));
+  }
+  $('priority-privacy-error').hidden = !fields.length;
+  $('priority-privacy-error').textContent = fields.length ? privacyMessage : '';
+  if (focus && fields.length) $(fields.includes('matters') && !fields.includes('purpose') ? 'priority-preserve' : 'priority-purpose').focus();
+  return !fields.length;
+}
+
 function readPriorities() {
   priorities.purpose = $('priority-purpose').value;
   priorities.preserve = $('priority-preserve').value;
   priorities.exploring = $('priority-exploring').checked;
   priorities.choices = [...document.querySelectorAll('[name="priority-choice"]:checked')].map(input => input.value);
   priorities.saved = false;
+  privacySaveNotice = false;
+  validatePriorityPrivacy();
   persist();
 }
 
@@ -489,6 +514,7 @@ $('priorities-form').addEventListener('input', readPriorities);
 $('priorities-form').addEventListener('submit', event => {
   event.preventDefault();
   readPriorities();
+  if (!validatePriorityPrivacy(true)) return;
   if (!priorities.purpose.trim() && !priorities.preserve.trim() && !priorities.choices.length) {
     priorities.exploring = true;
     $('priority-exploring').checked = true;
@@ -508,7 +534,6 @@ $('use-area').addEventListener('click', () => {
   mapView = { center: map.getCenter(), zoom: map.getZoom() };
   confirmed = true;
   render(); persist(); focusStep();
-  void prepareEvidence(findingsInput());
 });
 $('back-to-map').addEventListener('click', () => {
   leaveFindings();
@@ -534,23 +559,15 @@ function displayFindings(result) {
     void showFindings();
   }});
   $('findings-content').hidden = false;
-  $('findings-announcement').textContent = result.narrativeStatus === 'ready' ? 'Your preliminary findings are ready.' : 'The available property records are ready.';
+  $('findings-announcement').textContent = result.narrativeStatus === 'ready' ? 'Your preliminary findings are ready, including unresolved checks.' : 'The available findings have loaded. Some property checks remain unresolved.';
 }
 
 function findingsInput() {
   if (parcelShape !== JSON.stringify(points)) parcelKey = null;
   return {points: copy(points), query: queryLabel, parcelKey, priorities: {purpose: priorities.purpose, matters: priorities.preserve, choices: priorities.choices, exploring: priorities.exploring}};
 }
-function prepareEvidence(input, retry = false) {
-  const key = JSON.stringify({points: input.points, parcelKey: input.parcelKey});
-  if (!retry && evidenceRequest?.key === key && Date.now() - evidenceRequest.time < 15 * 60 * 1000) return evidenceRequest.promise;
-  const promise = fetch('/api/property-evidence', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(input), signal: AbortSignal.timeout(90000)})
-    .then(async response => {const result = await response.json(); if (!response.ok) throw new Error(result.error || 'The records lookup is unavailable.'); return result;})
-    .catch(error => ({lookupError: error.message}));
-  evidenceRequest = {key, promise, time: Date.now()};
-  return promise;
-}
 async function showFindings(retry = false) {
+  if (!validatePriorityPrivacy(true)) return;
   if (!confirmed || !validatePolygon(points).valid) return;
   findingsController?.abort();
   const sequence = ++findingsSequence;
@@ -566,21 +583,30 @@ async function showFindings(retry = false) {
   $('findings-progress').hidden = true;
   $('findings-content').hidden = true;
   render(); focusStep();
-  if (!retry && lastFindings?.signature === signature && Date.now() - lastFindings.time < 15 * 60 * 1000) { displayFindings(lastFindings.result); return; }
+  if (!retry && lastFindings?.signature === signature && Date.now() - lastFindings.time < (lastFindings.result.narrativeStatus === 'ready' ? 15 * 60 * 1000 : 30000)) { displayFindings(lastFindings.result); return; }
+  $('findings-loading').querySelector('p').textContent = 'Gloo is starting the property research…';
   $('findings-loading').hidden = false;
   $('findings-step').setAttribute('aria-busy', 'true');
-  const timer = setTimeout(() => controller.abort(), 140000);
+  const timer = setTimeout(() => controller.abort(), 200000);
   try {
-    const records = await prepareEvidence(input, retry);
-    if (sequence !== findingsSequence || !findingsOpen) return;
-    if (records.lookupError) throw new Error(records.lookupError);
-    if (records.schemaVersion !== 2 || !Array.isArray(records.sources)) throw new Error('We couldn’t read the property records. Please retry.');
-    displayFindings(records);
-    $('findings-loading').hidden = true;
-    if (!records.code.length || !records.parcel || records.zones.length !== 1 || records.status === 'needs-parcel' || records.locality?.boundaryUncertain || records.gaps.some(g => g.id === 'zoning-coverage')) return;
-    $('findings-progress').hidden = false;
-    const response = await fetch('/api/first-look', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: signature, signal: controller.signal});
-    const result = await response.json();
+    const response = await fetch('/api/first-look', {method: 'POST', headers: {'Content-Type': 'application/json', Accept: 'application/x-ndjson'}, body: signature, signal: controller.signal});
+    if (!response.ok) {const failed = await response.json(); throw new Error(failed.error || 'The research agent is unavailable.');}
+    const reader = response.body.getReader(), decoder = new TextDecoder();
+    let buffer = '', result;
+    while (true) {
+      const {done, value} = await reader.read();
+      buffer += decoder.decode(value, {stream: !done});
+      const lines = buffer.split('\n'); buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type === 'error') throw new Error(event.error);
+        if (event.type === 'result') result = event.result;
+        if (event.type === 'progress' && sequence === findingsSequence && findingsOpen) $('findings-loading').querySelector('p').textContent = event.message;
+      }
+      if (done) break;
+    }
+    if (!result) throw new Error('The research connection ended early. Retry; your selection is saved.');
     if (sequence !== findingsSequence || !findingsOpen) return;
     if (!response.ok) throw new Error(result.error || 'The first-look service is unavailable. Please try again.');
     if (result.schemaVersion !== 2 || !Array.isArray(result.sources)) throw new Error('We couldn’t read these findings. Please try again.');
