@@ -103,6 +103,15 @@ test('zoning tool memoization changes with parcel geometry and cannot reuse the 
  }}));assert.equal((await review(input())).narrativeStatus,'ready');assert.equal(reads,2);
 });
 
+test('a modest editorial overrun retains the full qualification without another model round; hard bounds remain',async()=>{
+ const a=answer();a.assessment.headline='Residential use has a supported route, subject to approval and a separate review of the selected land and access';
+ a.assessment.summary='The original provision supports considering housing, subject to its approval conditions. '.repeat(5)+'Access remains unresolved.';
+ const review=createFindingsService(options({fetchImpl:async(_u,opts)=>JSON.parse(opts.body).input.some(i=>i.type==='function_call_output')?new Response(JSON.stringify(payload(a))):response([call('review_evidence')])}));
+ const r=await review(input());assert.equal(r.narrativeStatus,'ready');assert.equal(r.research.modelCalls,2);assert.equal(r.assessment.summary,a.assessment.summary);assert.equal(r.assessment.support[0].quote,quote);
+ a.assessment.headline='x'.repeat(161);assert.throws(()=>parseReview(payload(a),evidence().sources),/assessment.headline/);
+ a.assessment.headline='Housing';a.assessment.summary='x'.repeat(701);assert.throws(()=>parseReview(payload(a),evidence().sources),/assessment.summary/);
+});
+
 test('readable code with an admitted missing use allowance prompts Gloo to choose a focused recovery',async()=>{
  let turn=0;const executed=[];
  const review=createFindingsService(options({sessionFactory:()=>({snapshot:evidence,execute:async name=>{executed.push(name);return {};}}),fetchImpl:async(_u,opts)=>{
@@ -124,4 +133,24 @@ test('a late subscriber receives acquired evidence immediately and a later model
  const second=review(input(),{onProgress:e=>progress.push(e)});
  assert.equal(progress[0].evidence.parcel.id,'parcel-A');release();
  const [a,b]=await Promise.all([first,second]);assert.deepEqual(a,b);assert.equal(a.parcel.id,'parcel-A');assert.equal(a.narrativeStatus,'unavailable');assert.equal(turn,2);
+});
+
+test('one incomplete model response can recover from retained evidence without executing its unfinished tools',async()=>{
+ let turn=0,executed=0;
+ const review=createFindingsService(options({sessionFactory:()=>({snapshot:evidence,execute:async()=>{executed++;return {};}}),fetchImpl:async(_u,opts)=>{
+  turn++;if(turn===1)return new Response(JSON.stringify({status:'incomplete',output:[call('read_map_source',{source_id:'unfinished'})]}));
+  if(turn===2){assert.match(JSON.stringify(JSON.parse(opts.body).input),/parcel-A/);return response([call('review_evidence')]);}
+  return new Response(JSON.stringify(payload()));
+ }}));
+ const r=await review(input());assert.equal(r.narrativeStatus,'ready');assert.equal(executed,1);assert.equal(turn,3);
+});
+
+test('a bulk-only citation cannot establish a supported housing-use route',()=>{
+ const e=evidence();e.sources[0].title='Residential bulk regulations';
+ assert.throws(()=>parseReview(payload(),e.sources),/Housing-use allowance unsupported/);
+});
+
+test('an official no-zoning system is not sent back to find a nonexistent use table',async()=>{
+ let calls=0;const review=createFindingsService(options({sessionFactory:()=>({snapshot:()=>({...evidence(),planningSystem:{type:'no-zoning'}}),execute:async()=>({})}),fetchImpl:async()=>++calls===1?response([call('review_evidence')]):new Response(JSON.stringify(payload({...answer(),housingRoute:'unresolved'})))}));
+ const r=await review(input());assert.equal(r.narrativeStatus,'partial');assert.equal(calls,2);
 });

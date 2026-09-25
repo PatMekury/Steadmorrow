@@ -79,3 +79,20 @@ test('chapter fragment selects its exact section, and whole chapter cannot masqu
  assert.ok(choice);const r=await s.read(choice.section_id);assert.equal(r.sources.length,1);assert.match(r.sources[0].text,/^32-121:/);
  assert.ok(!r.sources[0].text.includes('32-11:'));assert.ok(r.sources[0].url.endsWith('#32-121'));
 });
+
+test('publisher search retains district hierarchy and a route beyond irrelevant full-text mentions',async()=>{
+ const root='<aside><a href="/article-ii">Article II Residence District Regulations</a><a href="/article-iii">Article III Commercial District Regulations</a></aside><main>Publication home</main>';
+ const results='<div class="view-online-zr-search"><div class="view-content"><div class="views-row"><div class="views-field-title"><a href="/article-iii/chapter-2#32-12">32-12</a></div><div class="views-field-field-section-title">Residences</div></div></div></div>';
+ const s=createPublishedCodeSession(async url=>envelope(new URL(url).pathname==='/search'?results:root),{cityId:'3651000'});
+ const r=await s.search('residences');assert.match(r.sections[0].context,/Commercial District Regulations/);assert.equal(r.navigation.length,2);
+});
+
+test('chapter navigation offers section headings with chapter context rather than inline cross-references',async()=>{
+ const root='<main><a href="/article-iii">Commercial District Regulations</a></main>';
+ const article='<main><a href="/article-iii/chapter-2">Use Regulations</a></main>';
+ const chapter='<main><article class="node--type-section"><div class="section-title"><a href="/article-iii/chapter-2#32-121">32-121</a> Use Group II – general use allowances</div><div class="field--name-body">An incidental <a href="/article-iii/chapter-4/34-112">bulk cross-reference</a>.</div></article></main>';
+ const s=createPublishedCodeSession(async url=>({...envelope(new URL(url).pathname.endsWith('/chapter-2')?chapter:new URL(url).pathname.endsWith('/article-iii')?article:root),url}),{cityId:'3651000'});
+ const found=await s.search('use');const page=found.sections.find(p=>p.url.endsWith('/chapter-2'));
+ const r=await s.read(page.section_id);assert.equal(r.status,'navigation');assert.equal(r.sources.length,0);assert.equal(r.sections.length,1);
+ assert.match(r.sections[0].title,/Use Group II/);assert.match(r.sections[0].context,/Use Regulations/);assert.ok(r.sections[0].url.endsWith('#32-121'));
+});

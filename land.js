@@ -561,12 +561,13 @@ function leaveFindings() {
 }
 
 function displayFindings(result, progressive=false) {
+  if(progressive&&result.sources?.length)$('findings-step').setAttribute('aria-busy','false');
   renderFindings($('findings-content'), result, {onParcel: key => {
     parcelKey = key; parcelShape = JSON.stringify(points); lastFindings = null;
     void showFindings();
   }});
   $('findings-content').hidden = false;
-  $('findings-announcement').textContent = progressive ? (!result.sources?.length?'Research has started.':result.parcel?'The property boundary is available. Housing research is continuing.':'Verified evidence has arrived.') : result.assessment ? 'Your housing assessment is ready to review.' : 'Property research has finished. The available evidence is shown.';
+  $('findings-announcement').textContent = progressive ? (!result.sources?.length?'Research has started.':result.parcel?'The property boundary is available. Housing research is continuing.':'Verified evidence has arrived.') : result.researchError === 'local-call-limit' ? 'Research is paused at the local Gloo call limit.' : result.assessment ? 'Your housing assessment is ready to review.' : 'Property research has finished. The available evidence is shown.';
 }
 
 function findingsInput() {

@@ -57,7 +57,8 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
   const sourceRead=(target,options={})=>read(target,{...options,signal});
   const layers=new Map(),sections=new Map(),chapters=new Map(),checks=new Map();
   const discoveredKinds=new Set(),regionalKinds=new Set();
-  const completed=new Set(),sourceAttempts=new Map(),conflicts=[];let codeCatalog,publishedCodes,officialPages,chapterTruncated=false,webReads=0,locationAttempts=0;
+  const completed=new Set(),sourceAttempts=new Map(),conflicts=[];let codeCatalog,publishedCodes,officialPages,chapterTruncated=false,webReads=0,locationAttempts=0,specialControlAttempted=false;
+  const specialFlags=()=>Object.entries(state.parcel?.attributes??{}).filter(([key,value])=>/spdist|special.?dist|histdist|historic|landmark/i.test(key)&&value&&!/^(0|none|no|n|not applicable)$/i.test(String(value))).map(([key,value])=>({field:key,value:String(value)}));
   state.retrievalFailures=[];
   const official=()=>officialPages??=createOfficialSession({locality:state.locality,read:sourceRead,webRead,signal});
   const recordFailure=(name,url,error)=>{const f={name,url,...sourceFailure(error)};if(!state.retrievalFailures.some(e=>e.name===name&&e.url===url))state.retrievalFailures.push(f);};
@@ -123,7 +124,7 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
     result.assessmentScope=result.status==='preliminary'?'matched-site':'local-rules';result.gaps=gaps;
     result.checks=[...checks].map(([name,status])=>({name,status}));
     result.checks.push({name:'Environmental, access and title checks',status:'not-established'});
-    result.caseId=digest({points:input.points,parcel:result.parcel?.key,sources:result.sources.map(s=>s.hash)}).slice(0,20);return result;
+    result.caseId=digest({points:input.points,parcel:result.parcel?.key,sources:result.sources.map(s=>({id:s.id,url:s.url,hash:s.hash})).sort((a,b)=>a.id.localeCompare(b.id))}).slice(0,20);return result;
   };
   const requiredFollowUps=()=>{
     if(!state.locality)return locationAttempts<2?['resolve_location']:[];
@@ -151,6 +152,7 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
       else if(sections.size||(publishedCodes?.needsRead()??false))required.push('read_code_sections: search titles are not evidence');
     }
     const codeSources=snapshot().sources.filter(s=>s.kind==='code-provision');
+    if(state.code.length&&!specialControlAttempted&&specialFlags().length)required.push('search_code_sections: use the parcel’s special/historic/landmark flags '+JSON.stringify(specialFlags())+' to look for the applicable original modifications before concluding from base-district rules.');
     if(codeSources.some(s=>s.scopeConflict)&&!codeSources.some(s=>s.tableDistricts?.length&&!s.scopeConflict))required.push('search_code_sections or read_code_sections: retrieved district tables do not cover the mapped districts. Navigate to the correct district family and read its operative housing allowances.');
     if(chapterTruncated&&!completed.has('search_code_sections'))required.push('search_code_sections: chapter listing was truncated; search for operative housing and development-approval provisions');
     return required;
@@ -218,6 +220,7 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
     if(name==='read_housing_context'){
       const housing=await housingContext(sourceRead,state.locality);state.housing={...housing};delete state.housing.evidence;addSource(housing.evidence);checks.set('Housing context','retrieved');return {housing:state.housing,source:housing.evidence};
     }
+    if(name==='search_code_sections'&&(/special|historic|landmark/i.test(args.query)||specialFlags().some(f=>f.value.length>=3&&args.query.toLowerCase().includes(f.value.toLowerCase()))))specialControlAttempted=true;
     let c;try{c=await catalog();}catch(error){
       if(name==='search_code_sections'){const result=await published().search(args.query);state.codeAccess=result.failures??[];return result;}
       if(name==='read_code_sections'&&args.section_ids.every(id=>published().has(id)))c=null;
