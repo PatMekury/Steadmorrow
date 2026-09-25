@@ -13,7 +13,7 @@ async function readAppConfig(root, environment) {
   try {
     const source = await readFile(resolve(root, '.env.local'), 'utf8');
     for (const line of source.split(/\r?\n/)) {
-      const match = /^(?:export\s+)?(GOOGLE_MAPS_API_KEY|GOOGLE_MAPS_KEY_MODE|GLOO_API_KEY|GLOO_MODEL)\s*=\s*(.*)$/.exec(line.trim());
+      const match = /^(?:export\s+)?(GOOGLE_MAPS_API_KEY|GOOGLE_MAPS_KEY_MODE|GLOO_API_KEY|GLOO_MODEL|GLOO_MAX_DAILY_CALLS)\s*=\s*(.*)$/.exec(line.trim());
       if (!match) continue;
       let value = match[2].trim();
       if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
@@ -30,7 +30,7 @@ async function readAppConfig(root, environment) {
   const mode = String(environment.GOOGLE_MAPS_KEY_MODE ?? local.GOOGLE_MAPS_KEY_MODE ?? 'standard').trim() || 'standard';
   return {
     maps: { apiKey, mode, configured: Boolean(apiKey) },
-    gloo: { apiKey: String(environment.GLOO_API_KEY ?? local.GLOO_API_KEY ?? '').trim(), model: String(environment.GLOO_MODEL ?? local.GLOO_MODEL ?? 'gloo-openai-gpt-5-mini').trim() },
+    gloo: { apiKey: String(environment.GLOO_API_KEY ?? local.GLOO_API_KEY ?? '').trim(), model: String(environment.GLOO_MODEL ?? local.GLOO_MODEL ?? 'gloo-openai-gpt-5-mini').trim(),maxDailyCalls:Number(environment.GLOO_MAX_DAILY_CALLS??local.GLOO_MAX_DAILY_CALLS??480),budgetFile:resolve(root,'.runtime/research-usage.json') },
   };
 }
 

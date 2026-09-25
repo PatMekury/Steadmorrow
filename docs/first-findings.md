@@ -1,5 +1,16 @@
 # First findings — September 21, 2026
 
+## Mandatory First findings correction — September 24, 2026
+
+The user rejected the record-heavy First findings experience. Retrieval success is not product success: design for a non-expert church leader understanding the property's affordable-housing possibilities, the evidence, the decisive obstacle and the next useful decision. Follow the original Challenge Summary, pages 18–20, throughout the work; do not make the user police alignment. Finch/Delve are inspiration for meaningful site/constraint explanation, not a substitute for evidence or an instruction to integrate a vendor.
+
+Latest requirements: remove **Housing pressure nearby**, **Some information is still missing** and equivalent generic banners; remove repeated survey/title/feasibility disclaimers instead of rephrasing them. Keep specific consequential uncertainty beside the affected conclusion. **Hide the landing hero, large heading and video throughout First findings, including loading, partial/error, reload and print/save-to-PDF; pause the hidden video.** Preserve the opening page, Back navigation and user work. The user reports up to five minutes waiting: measure and improve actual research latency and progressively show verified useful results; a shorter timeout returning less evidence is not a fix.
+
+Read the full correction at `C:\Users\patmekury\Documents\Gloo hackathon\output\strategy\First_Findings_Correction_2026-09-24.md` (also copied to app `docs/first-findings-correction-2026-09-24.md`). It contains the New York parcel/zoning regression case, research and design constraints, and acceptance checks. The next-task prompt is `C:\Users\patmekury\Documents\Gloo hackathon\output\strategy\First_Findings_New_Task_Prompt.md` (also app `docs/first-findings-next-task.md`).
+
+This is a recorded correction and handoff, **not a claim that these application changes are implemented**. It supersedes conflicting historical descriptions below. Preserve Gloo-directed research, location-driven U.S. scope, deferred Regrid and the supplied visual guide. No award guarantee or invented feasibility.
+
+
 First findings uses a Gloo tool-using agent to research the location the user selects. See [agent implementation](gloo-agent.md) for the control loop and Studio distinction. There is no chosen city, municipality allowlist, or hard-coded zoning rule pack. Individual locations used during verification are test cases only. This replaces the rejected user-input-only reflection and three-question screen.
 
 ## What the user receives
@@ -78,3 +89,8 @@ Reference for geographic government distinctions: https://www.census.gov/library
 ### Input privacy boundary
 
 See [Data use](data-use.md) for the challenge-aligned data declaration. User inputs are screened locally before persistence or Google requests and independently on the server before Gloo/tool activity. Flagged legacy drafts are cleaned on load. Source feature fields are minimized by name/alias, and unsolicited attributes are discarded. The checks address common patterns, not every possible name or personal disclosure. Only nonpersonal property goals belong in these fields; no consent/synthetic flag bypass is offered.
+
+
+## Public-source recovery — September 24, 2026
+
+Regrid is deferred. Gloo-selected official-website/PDF research, linked GIS discovery, recovery and shared public-response caching are implemented. See docs/public-source-recovery.md (public-source-recovery.md from this docs folder) for exact behavior and bounds. The production server now persists 480 rolling-24-hour model-call reservations, with 20 model rounds / 32 tools / 180 seconds per case. Historical process-only budget descriptions are superseded. Complete national coverage, OCR, record uploads, numeric feasibility, simulation and presentation exports remain unimplemented.

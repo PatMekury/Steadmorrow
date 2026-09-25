@@ -10,6 +10,7 @@
   <link rel="preload" href="assets/fonts/Outfit-variable.ttf" as="font" type="font/ttf" crossorigin>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="land.css">
+  <script>try{if(sessionStorage.getItem('steadmorrow.findings.open')==='true')document.documentElement.classList.add('findings-active');}catch{}</script>
   <script src="app.js" type="module"></script>
   <script src="land.js" type="module"></script>
 </head>
@@ -56,6 +57,7 @@
       <div class="land-inner">
         <header class="land-intro">
           <button id="back-to-map" class="step-back" type="button" aria-label="Back to map" hidden><span aria-hidden="true">←</span> Back to map</button>
+          <button id="back-to-opening" class="step-back" type="button" hidden>Steadmorrow home</button>
           <h2 id="experience-title" tabindex="-1">Start with the land.</h2>
         </header>
         <div class="land-workbench">
@@ -184,7 +186,6 @@
           <p id="save-status" class="save-status" role="status" aria-live="polite"></p>
         </section>
         <section id="findings-step" class="findings-step" aria-labelledby="experience-title" hidden>
-          <p class="findings-scope">The property, the published rules, and what still needs checking.</p>
           <div id="findings-loading" class="findings-loading" role="status" hidden><span class="map-loading-mark" aria-hidden="true"></span><p>Looking up public property records…</p></div>
           <div id="findings-error" class="findings-error" hidden>
             <p id="findings-error-message" role="alert"></p>

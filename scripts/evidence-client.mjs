@@ -13,17 +13,20 @@ export function isSourceUrl(value) {
   } catch { return false; }
 }
 export function createEvidenceClient({ fetchImpl = fetch, now = Date.now, timeoutMs = 12000 } = {}) {
-  const cache = new Map(), pending = new Map();
+  const cache = new Map(), pending = new Map();let cacheBytes=0;
   return async function read(url, { format = 'json', maxBytes = 4_000_000, ttl = 900_000, signal } = {}) {
     signal?.throwIfAborted();
     const target = new URL(url);
     if (!isSourceUrl(url)) throw new Error('Unsupported source');
-    const key = `${format}:${url}`;
+    // Fragments identify sections within one document, not separate HTTP
+    // resources. Keep the section URL in its citation while sharing this body.
+    target.hash='';const requestUrl=target.href;
+    const key = `${format}:${maxBytes}:${requestUrl}`;
     const saved = cache.get(key);
-    if (saved && now() - saved.time < ttl) return saved.value;
-    if (pending.has(key)) return pending.get(key);
+    if (saved && now() - saved.time < Math.min(ttl,86400000)) return structuredClone(saved.value);
+    if (pending.has(key)) return structuredClone(await pending.get(key));
     const task = (async () => {
-      const response = await fetchImpl(url, { redirect: 'error', signal: signal?AbortSignal.any([signal,AbortSignal.timeout(timeoutMs)]):AbortSignal.timeout(timeoutMs), headers: { Accept: format === 'json' ? 'application/json' : '*/*', 'User-Agent':'Steadmorrow/0.1 (local housing research prototype)', ...(target.hostname.includes('municode.com') ? {'X-CSRF':'1'} : {}) } });
+      const response = await fetchImpl(requestUrl, { redirect: 'error', signal: AbortSignal.timeout(timeoutMs), headers: { Accept: format === 'json' ? 'application/json' : '*/*', 'User-Agent':'Steadmorrow/0.1 (local housing research prototype)', ...(target.hostname.includes('municode.com') ? {'X-CSRF':'1'} : {}) } });
       if (!response.ok) { await response.body?.cancel(); throw new Error(`Source returned ${response.status}`); }
       const reader = response.body.getReader(), chunks = []; let size = 0;
       while (true) {
@@ -35,13 +38,14 @@ export function createEvidenceClient({ fetchImpl = fetch, now = Date.now, timeou
       const buffer = Buffer.concat(chunks);
       const data = format === 'json' ? JSON.parse(buffer.toString('utf8')) : format === 'bytes' ? buffer : buffer.toString('utf8');
       if (format === 'json' && data.error) throw new Error('Source query failed');
-      const value = { data, retrievedAt: new Date(now()).toISOString(), hash: digest(buffer), url };
-      cache.set(key, {time: now(), value});
-      if (cache.size > 160) cache.delete(cache.keys().next().value);
+      const value = { data, retrievedAt: new Date(now()).toISOString(), hash: digest(buffer), url:requestUrl };
+      if(cache.has(key)){cacheBytes-=cache.get(key).size;cache.delete(key);}
+      cache.set(key, {time: now(), value,size:buffer.length});cacheBytes+=buffer.length;
+      while(cache.size>160||cacheBytes>24_000_000){const first=cache.keys().next().value;cacheBytes-=cache.get(first).size;cache.delete(first);}
       return value;
     })();
     pending.set(key, task);
-    try { return await task; } finally { pending.delete(key); }
+    try { const result=await task;signal?.throwIfAborted();return structuredClone(result); } finally { pending.delete(key); }
   };
 }
 

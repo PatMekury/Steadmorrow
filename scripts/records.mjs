@@ -27,11 +27,16 @@ export async function locate(read, points) {
     x:p.lng.toFixed(6),y:p.lat.toFixed(6),benchmark:'Public_AR_Current',vintage:'Current_Current',layers:'States,Counties,Incorporated Places,County Subdivisions',format:'json',
   })))));
   const unpack=r=>jurisdictionFromGeographies(r.ok?r.value.data.result?.geographies:null);
-  const locality=unpack(responses[0]);
+  const centerLocality=unpack(responses[0]);
+  const successful=responses.map(unpack).filter(Boolean);
+  // Consistent corner lookups can still guide discovery when the center service
+  // request fails. They do not prove the missing center or whole jurisdiction.
+  const locality=centerLocality||(successful.length>=2&&successful.every(l=>sameJurisdiction(l,successful[0]))?successful[0]:null);
   if (!locality) return null;
   locality.boundaryLookupIncomplete=responses.some(r=>!unpack(r));
   locality.boundaryUncertain=responses.some(r=>!sameJurisdiction(locality,unpack(r)));
-  return {locality,evidence:source('jurisdiction','Geographic jurisdiction lookup','U.S. Census Bureau',responses[0].value,{text:`Selected-area center: ${locality.label}; county: ${locality.county}. ${locality.boundaryUncertain?(locality.boundaryLookupIncomplete?'One or more corner lookups could not be completed.':'The corners do not all resolve to the same jurisdiction.'):'All four selected corners resolved to the same municipality, active township/town and county identifiers.'} Census geography guides discovery; it does not establish exclusive planning authority, tribal jurisdiction or land ownership.`,kind:'geographic-reference'})};
+  const response=responses.find(r=>unpack(r))?.value;
+  return {locality,evidence:source('jurisdiction','Geographic jurisdiction lookup','U.S. Census Bureau',response,{text:`${centerLocality?'Selected-area center':'Consistent corner locations (center unresolved)'}: ${locality.label}; county: ${locality.county}. ${locality.boundaryUncertain?(locality.boundaryLookupIncomplete?'One or more location lookups could not be completed.':'The corners do not all resolve to the same jurisdiction.'):'All four selected corners resolved to the same municipality, active township/town and county identifiers.'} Census geography guides discovery; it does not establish exclusive planning authority, tribal jurisdiction or land ownership.`,kind:'geographic-reference'})};
 }
 
 export function suitableItem(item, kind, locality) {
@@ -47,7 +52,7 @@ export function suitableItem(item, kind, locality) {
   return nameTokens.some(name=>description.includes(name));
 }
 
-export async function discoverLayers(read, locality, points, kind, searchHint='',scope='local') {
+export async function discoverLayers(read, locality, points, kind, searchHint='',scope='local',officialSeeds=[]) {
   const names=localityNames(locality).map(n=>`"${cleanQuery(n)}"`).join(' OR ');
   const baseTerm=kind==='parcel'?'(title:parcel OR title:parcels OR title:"tax lots" OR title:cadastral OR title:MapPLUTO)':'(title:zoning OR title:"land use zoning")';
   const term=searchHint?`(${baseTerm} OR title:"${cleanQuery(searchHint)}")`:baseTerm;
@@ -62,15 +67,15 @@ export async function discoverLayers(read, locality, points, kind, searchHint=''
   };
   const type='(type:"Feature Service" OR type:"Map Service")';
   const query=`(${names}) AND ${term} AND ${type}`;
-  const next=await search(query);
+  const next=officialSeeds.length?-1:await search(query);
   // Regional discovery lets the model recover from sparse naming/metadata and
   // page past popular, non-applicable search results. Geometry is still queried.
-  if(scope==='regional'){
+  if(!officialSeeds.length&&scope==='regional'){
     if(next>0)await search(query,next);
     await search(`${term} AND ${type}`);
-  }else if(!summaries.length&&names)await search(`${term} AND ${type}`);
-  const connected=await Promise.all(catalogueConnections.filter(c=>c.kind===kind&&connectionMatches(c,locality)).map(async c=>{try{return {...(await read(`${arc}/content/items/${c.itemId}?f=json`)).data,connection:c};}catch{return null;}}));
-  const candidates=[...new Map([...summaries,...connected.filter(Boolean)].filter(i=>i.connection||suitableItem(i,kind,locality)).map(i=>[i.url.replace(/^http:/,'https:').replace(/\/$/,''),i])).values()];
+  }else if(!officialSeeds.length&&!summaries.length&&names)await search(`${term} AND ${type}`);
+  const connected=officialSeeds.length?[]:await Promise.all(catalogueConnections.filter(c=>c.kind===kind&&connectionMatches(c,locality)).map(async c=>{try{return {...(await read(`${arc}/content/items/${c.itemId}?f=json`)).data,connection:c};}catch{return null;}}));
+  const candidates=[...new Map([...officialSeeds,...summaries,...connected.filter(Boolean)].filter(i=>i.authorityProof||i.connection||suitableItem(i,kind,locality)).map(i=>[i.url.replace(/^http:/,'https:').replace(/\/$/,''),i])).values()];
   const trustRank=i=>i.connection?4:verifiedProvider(i.url)?3:new URL(i.url).hostname.endsWith('.gov')?2:i.contentStatus==='public_authoritative'?1:0;
   candidates.sort((a,b)=>trustRank(b)-trustRank(a) || (b.modified??0)-(a.modified??0));
   diagnostics.candidates=candidates.length;
@@ -79,15 +84,15 @@ export async function discoverLayers(read, locality, points, kind, searchHint=''
     diagnostics.checked++;
     try {
       let item=candidate;
-      if(item.id&&(!item.orgId||!item.contentStatus)){
+      if(item.id&&!item.authorityProof&&(!item.orgId||!item.contentStatus)){
         try{item={...candidate,...(await read(`${arc}/content/items/${encodeURIComponent(item.id)}?f=json`)).data};}catch{}
       }
       const url=item.url.replace(/^http:/,'https:').replace(/\/$/,'');
-      if(!isSourceUrl(url))return [];
+      if(!isSourceUrl(url)&&!item.authorityProof)return [];
       const provider=verifiedProvider(url);
       const governmentHost=new URL(url).hostname.endsWith('.gov') || /\.(?:state\.[a-z]{2}|(?:co|ci)\.[a-z-]+\.[a-z]{2})\.us$/.test(new URL(url).hostname);
       let publisher=provider?.publisher||plain(item.accessInformation)||'Government GIS publisher';
-      if (!governmentHost&&!provider&&!item.connection) {
+      if (!governmentHost&&!provider&&!item.connection&&!item.authorityProof) {
         if (item.contentStatus!=='public_authoritative' || !item.orgId){diagnostics.rejectedPublisher++;return [];}
         const org=await read(`${arc}/portals/${encodeURIComponent(item.orgId)}?f=json`);
         publisher=plain(org.data.name);
@@ -107,10 +112,11 @@ export async function discoverLayers(read, locality, points, kind, searchHint=''
           try{
             const meta=option.meta??(await read(`${option.url}?f=json`)).data;
             if(meta.geometryType!=='esriGeometryPolygon'||!Array.isArray(meta.fields))return null;
-            const fields=meta.fields.filter(f=>!isPrivateRecordField(f)&&/objectid|parcel|pin\b|apn|(?:hcad|tax|property)_?(?:num|id)|account|acct|address|situs|zone|zoning|district|land.?use|current.?use|unit|building|acre|sqft|area|ordinance|effective|chapter|code.?link/i.test(`${f.name} ${f.alias}`)).map(f=>f.name);
+            const fields=meta.fields.filter(f=>!isPrivateRecordField(f)&&/objectid|parcel|pin\b|apn|(?:hcad|tax|property)_?(?:num|id)|account|acct|address|situs|zone|zoning|district|land.?use|current.?use|unit|building|bldg|builtfar|residfar|commfar|facilfar|spdist|histdist|landmark|e_desig|acre|sqft|area|ordinance|effective|chapter|code.?link/i.test(`${f.name} ${f.alias}`)).map(f=>f.name);
             const idField=findField(meta,kind==='parcel'?parcelIdPatterns:zoneIdPatterns);
+            if(item.authorityProof&&!thematic(option.name||meta.name||item.title))return null;
             if(!idField&&(option.name||meta.name)&&!thematic(option.name||meta.name))return null;
-            const identifierFields=meta.fields.filter(f=>!isPrivateRecordField(f)&&/^(esriFieldTypeString|esriFieldTypeInteger|esriFieldTypeDouble|esriFieldTypeSmallInteger)$/.test(f.type??'esriFieldTypeString')&&!/object.?id|global.?id|^fid$|^oid$|shape|geom|owner|mail|phone|email|address|acre|area|length|date|value|created|edited|subdivision|block|type|description|status|county|municipal|jurisdiction|name|^zone$|^section$|^plat$/i.test(f.name+' '+(f.alias??''))).slice(0,30).map(f=>({name:f.name,alias:f.alias??f.name}));
+            const identifierFields=meta.fields.filter(f=>!isPrivateRecordField(f)&&/^(esriFieldTypeString|esriFieldTypeInteger|esriFieldTypeDouble|esriFieldTypeSmallInteger)$/.test(f.type??'esriFieldTypeString')&&!/object.?id|global.?id|^fid$|^oid$|shape|geom|owner|mail|phone|email|address|acre|area|length|date|value|created|edited|subdivision|borough|borocode|borocd|census|tract|^lot$|^lot |block|type|description|status|county|municipal|jurisdiction|name|^zone$|^section$|^plat$/i.test(f.name+' '+(f.alias??''))).slice(0,30).map(f=>({name:f.name,alias:f.alias??f.name}));
             if(!idField&&(kind!=='parcel'||!identifierFields.length))return null;
             if(idField&&!fields.includes(idField.name))fields.push(idField.name);
             const addressField=findField(meta,[/^situs_?(addr|address)$/i,/^(?:prop_loc|st_address|parcel_addr)$/i,/^address$/i,/^full_?addr(ess)?$/i,/situs|address/i]);
@@ -167,7 +173,7 @@ export async function readSpatial(read,layers,geometry,kind,diagnostics={}) {
       const records=[...merged.values()].map(r=>({...r,overlapSquareMeters:overlapArea(r.geometry,geometry),mappedSquareMeters:multiArea(r.geometry)})).sort((a,b)=>b.overlapSquareMeters-a.overlapSquareMeters);
       if(!records.length)continue;
       const evidence=source(kind,plain(layer.item.title),layer.publisher,response,{
-        url:`https://www.arcgis.com/home/item.html?id=${layer.item.id}`,queryUrl:response.url,
+        url:layer.item.sourcePage||`https://www.arcgis.com/home/item.html?id=${layer.item.id}`,queryUrl:response.url,authorityProof:layer.item.authorityProof,
         layerUrl:layer.url,sourceUpdatedAt:layer.meta.editingInfo?.lastEditDate?new Date(layer.meta.editingInfo.lastEditDate).toISOString():null,
         catalogUpdatedAt:layer.item.modified?new Date(layer.item.modified).toISOString():null,
         attribution:plain(layer.meta.copyrightText||layer.item.accessInformation),license:plain(layer.item.licenseInfo)||'No reuse licence stated in the catalogue; displayed with source attribution.',
@@ -175,7 +181,7 @@ export async function readSpatial(read,layers,geometry,kind,diagnostics={}) {
         kind:'mapped-record',
       });
       return {records,evidence};
-    } catch { diagnostics.failedQueries++; /* A failed query is not a verified empty result. */ }
+    } catch(error) { diagnostics.failedQueries++;(diagnostics.failures??=[]).push(/Source returned \d+|Incomplete spatial|Unsupported source|Invalid source/.test(error.message)?error.message:'Source timed out or could not be read'); }
   }
   return null;
 }

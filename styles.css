@@ -128,3 +128,6 @@ h2 { margin: 0; max-width: 900px; font-size: clamp(40px, 5vw, 76px); line-height
 @media (min-width: 761px) {
   .city-scene::after { content: ""; position: absolute; inset: 0 0 auto; height: 47%; background: linear-gradient(to bottom, rgb(217 217 212 / .76), rgb(217 217 212 / .35) 68%, transparent); pointer-events: none; }
 }
+
+html.findings-active .hero-story, .hero-story[hidden] { display:none !important; }
+html.findings-active .skip-link { display:none; }

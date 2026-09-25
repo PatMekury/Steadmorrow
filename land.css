@@ -238,10 +238,84 @@
 .parcel-choice small { color: var(--land-muted); font-size: 14px; font-weight: 400; }
 .findings-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
 #findings-progress { margin: 0 0 24px; padding-left: 14px; border-left: 3px solid var(--land-green); color: var(--land-muted); font-size: 14px; line-height: 22px; }
+/* A single property plan followed by the decision, using the supplied paper,
+   Outfit and green palette. Evidence opens within the same reading flow. */
+html.findings-active .land-experience { padding-top: 28px; }
+[data-step="findings"] .land-intro { display:flex; flex-wrap:wrap; align-items:center; gap:16px 28px; margin-bottom:28px; }
+[data-step="findings"] .land-intro h2 { flex-basis:100%; font-size:16px; line-height:24px; font-weight:500; letter-spacing:0; margin:0; color:var(--land-muted); }
+[data-step="findings"] .step-back { margin:0; }
+#back-to-opening { margin-left:auto; font-size:14px; }
+.findings-step { max-width:960px; margin:auto; }
+.findings-loading { min-height:0; padding:12px 0 24px; font-size:14px; color:var(--land-muted); }
+.findings-loading .map-loading-mark { width:20px; height:20px; flex:none; }
+.findings-step .property-address { font-size:32px; line-height:38px; margin:0 0 6px; }
+.property-identity .findings-location { margin:0 0 20px; }
+.site-view { margin:0 0 32px; }
+.site-view svg { display:block; width:100%; height:320px; background:var(--land-paper); border-radius:24px; }
+.site-view svg text { font:14px Outfit,sans-serif; fill:#555; }
+.site-parcel { fill:#fff; }
+.site-boundary { fill:none; stroke:#242424; stroke-width:2; }
+.site-zone { stroke:#8e9f83; stroke-width:1; fill:#dce8d6; transition:opacity .15s; }
+.site-zone-1 { fill:#ece3cf; stroke:#b7a47c; }
+.site-zone-2 { fill:#e3dcec; stroke:#a495b5; }
+.site-zone.is-dimmed { opacity:.15; }
+.site-selection { fill:#4285f43d; stroke:#2469da; stroke-width:3; }
+.site-corner { fill:#fff; stroke:#1f2937; stroke-width:1.5; }
+.site-scale { fill:none; stroke:#555; stroke-width:1; }
+.site-legend { display:flex; flex-wrap:wrap; gap:10px 24px; margin:14px 0; font-size:14px; line-height:22px; }
+.site-legend span:before { content:''; display:inline-block; width:12px; height:12px; margin-right:8px; border:2px solid #242424; border-radius:3px; vertical-align:-1px; }
+.site-legend .legend-selected:before { border-color:#2469da; background:#4285f43d; }
+.site-controls { display:flex; flex-wrap:wrap; gap:8px; }
+.site-zone-button { font:500 14px/20px Outfit,sans-serif; border:1px solid #ccc; background:#fff; border-radius:100px; padding:10px 18px; cursor:pointer; color:#222; }
+.site-zone-button[aria-pressed="true"] { border-color:var(--land-green); background:var(--land-green); }
+.site-explanation { font-size:16px; line-height:24px; margin:14px 0 0; max-width:790px; }
+.housing-assessment { margin:28px 0; }
+.findings-kicker { color:#166c3d; }
+.findings-detail { font-size:15px; line-height:23px; }
+.findings-detail > summary { color:#166c3d; min-height:44px; padding:10px 0; }
+.assessment-reasons { border-top:1px solid #e6e6e6; }
+.assessment-reasons > section { padding:20px 0; border-bottom:1px solid #e6e6e6; }
+.assessment-reasons h4 { margin:0 0 8px; }
+.assessment-reasons p { margin:0 0 8px; max-width:800px; }
+.assessment-decision { margin:28px 0; padding:24px 28px; background:var(--land-paper); border-radius:24px; }
+.assessment-decision h4 { margin:0 0 8px; }
+.assessment-decision p { margin:8px 0; }
+.decision-action { font-weight:500; }
+.property-fields { display:grid; grid-template-columns:minmax(100px,1fr) 2fr; font-size:14px; gap:6px 16px; }
+.property-fields dd { margin:0; }
+.site-zone-button:focus-visible { outline:3px solid #166c3d; outline-offset:3px; }
+.print-sources { display:none; }
+@media (prefers-reduced-motion: reduce) { .site-zone { transition:none; } }
+@media print {
+  @page { margin:12mm; }
+  html.findings-active .hero-story, html.findings-active .skip-link,
+  [data-step="findings"] .land-intro button, .findings-actions, .site-controls,
+  .findings-loading .map-loading-mark { display:none !important; }
+  html.findings-active .land-experience { padding:0; margin:0; min-height:0; }
+  [data-step="findings"] .land-inner { max-width:none; padding:0; }
+  .findings-step { max-width:none; }
+  .site-view svg { max-height:220px; print-color-adjust:exact; }
+  .findings-step .findings-answer { font-size:24px; line-height:29px; }
+  .findings-answer-text { font-size:16px; line-height:23px; }
+  .site-view, .housing-assessment, .assessment-reasons > section, .assessment-decision { break-inside:avoid; }
+  .findings-step details:not([open]) > :not(summary) { display:none !important; }
+  .findings-detail, .evidence-source { break-inside:avoid; }
+  .evidence-source a::after { content:' (' attr(href) ')'; overflow-wrap:anywhere; }
+  .findings-attribution { margin:12px 0; }
+  .print-sources { display:block; font-size:10px; line-height:14px; overflow-wrap:anywhere; }
+  .print-sources h4 { margin-bottom:8px; }
+  .print-sources p { break-inside:avoid; margin:7px 0; }
+  .findings-step details:not([open]) { display:none; }
+}
 @media (max-width: 767px) {
   .findings-step .findings-answer { font-size: 28px; line-height: 34px; }
   .findings-answer-text { font-size: 18px; line-height: 27px; }
   .finding-label { font-size: 20px; line-height: 26px; }
   .findings-open-question { padding: 24px; }
   .findings-actions { flex-direction: column; }
+  html.findings-active .land-experience { padding-top:20px; }
+  .findings-step .property-address { font-size:28px; line-height:34px; }
+  .site-view svg { height:260px; }
+  .site-legend { flex-direction:column; gap:6px; }
+  .assessment-decision { padding:22px; }
 }

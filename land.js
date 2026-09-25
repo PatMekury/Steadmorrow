@@ -77,6 +77,13 @@ function areaLabel() {
 }
 
 function render() {
+  const activeFindings=confirmed&&findingsOpen;
+  document.documentElement.classList.toggle('findings-active',activeFindings);
+  $('top').hidden=activeFindings;
+  $('back-to-opening').hidden=!activeFindings;
+  if(activeFindings)$('city-video').pause();
+  document.dispatchEvent(new Event('steadmorrow:step'));
+  try{sessionStorage.setItem('steadmorrow.findings.open',String(activeFindings));}catch{}
   const valid = validatePolygon(points);
   const closeEnough = map && map.getZoom() >= 16;
   $('experience').dataset.hasSelection = String(points.length > 0);
@@ -553,13 +560,13 @@ function leaveFindings() {
   $('findings-progress').hidden = true;
 }
 
-function displayFindings(result) {
+function displayFindings(result, progressive=false) {
   renderFindings($('findings-content'), result, {onParcel: key => {
     parcelKey = key; parcelShape = JSON.stringify(points); lastFindings = null;
     void showFindings();
   }});
   $('findings-content').hidden = false;
-  $('findings-announcement').textContent = result.narrativeStatus === 'ready' ? 'Your preliminary findings are ready, including unresolved checks.' : 'The available findings have loaded. Some property checks remain unresolved.';
+  $('findings-announcement').textContent = progressive ? (!result.sources?.length?'Research has started.':result.parcel?'The property boundary is available. Housing research is continuing.':'Verified evidence has arrived.') : result.assessment ? 'Your housing assessment is ready to review.' : 'Property research has finished. The available evidence is shown.';
 }
 
 function findingsInput() {
@@ -583,6 +590,8 @@ async function showFindings(retry = false) {
   $('findings-progress').hidden = true;
   $('findings-content').hidden = true;
   render(); focusStep();
+  if (lastFindings?.signature===signature) displayFindings(lastFindings.result);
+  else displayFindings({selectedArea:{geometry:[[points.map(p=>[p.lng,p.lat]).concat([[points[0].lng,points[0].lat]])]],squareMeters:areaSquareMeters(points)},sources:[],zones:[],narrativeStatus:'researching'},true);
   if (!retry && lastFindings?.signature === signature && Date.now() - lastFindings.time < (lastFindings.result.narrativeStatus === 'ready' ? 15 * 60 * 1000 : 30000)) { displayFindings(lastFindings.result); return; }
   $('findings-loading').querySelector('p').textContent = 'Gloo is starting the property research…';
   $('findings-loading').hidden = false;
@@ -602,7 +611,12 @@ async function showFindings(retry = false) {
         const event = JSON.parse(line);
         if (event.type === 'error') throw new Error(event.error);
         if (event.type === 'result') result = event.result;
-        if (event.type === 'progress' && sequence === findingsSequence && findingsOpen) $('findings-loading').querySelector('p').textContent = event.message;
+        if (event.type === 'progress' && sequence === findingsSequence && findingsOpen) {
+          if(event.message)$('findings-loading').querySelector('p').textContent = event.message;
+          if(event.evidence?.schemaVersion===2&&Array.isArray(event.evidence.sources)){
+            lastFindings={signature,result:event.evidence,time:0};displayFindings(event.evidence,true);
+          }
+        }
       }
       if (done) break;
     }
@@ -660,6 +674,7 @@ document.querySelectorAll('[data-nudge]').forEach(button => button.addEventListe
 }));
 
 restore();
+try{findingsOpen=confirmed&&sessionStorage.getItem('steadmorrow.findings.open')==='true';}catch{}
 $('priority-purpose').value = priorities.purpose;
 $('priority-preserve').value = priorities.preserve;
 $('priority-exploring').checked = priorities.exploring;
@@ -670,3 +685,5 @@ const observer = new IntersectionObserver(entries => {
   if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); if (!confirmed) initialize(); }
 }, { rootMargin: '250px' });
 observer.observe($('experience'));
+if(findingsOpen)void showFindings();
+$('back-to-opening').addEventListener('click',()=>{leaveFindings();render();$('top').scrollIntoView({behavior:'instant'});document.querySelector('.brand').focus({preventScroll:true});});

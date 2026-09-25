@@ -1,9 +1,11 @@
 import {createPublishedCodeSession} from './published-code.mjs';
+import {createOfficialSession} from './official-sources.mjs';
+import {createPublicWebClient,sourceFailure} from './public-web.mjs';
 import {load} from 'cheerio';
 import {createEvidenceClient,digest} from './evidence-client.mjs';
 import {locate,discoverLayers,readSpatial,housingContext} from './records.mjs';
 import {planningContext,municipalClient} from './planning-context.mjs';
-import {selectedGeometry,multiArea,overlapArea,union} from './site-geometry.mjs';
+import {selectedGeometry,multiArea,overlapArea,union,intersect} from './site-geometry.mjs';
 
 const plain=value=>load(String(value??'')).text().replace(/\s+/g,' ').trim();
 const canonical=value=>plain(value).toLowerCase().replace(/[^a-z0-9]/g,'');
@@ -18,25 +20,30 @@ const tool=(name,description,properties={},required=[])=>({type:'function',funct
 export const researchTools=[
   tool('resolve_location','Resolve the user-selected outline to official municipality, active town/township and county identifiers. Start here; never substitute another location.'),
   tool('discover_map_sources','Discover trusted parcel or zoning polygon sources for this location. Returns source IDs and metadata; choose a source to query. Use search_scope regional after local sources fail or have no match; it searches wider catalogue pages. A different search hint can locate alternatives.',{kind:{type:'string',enum:['parcel','zoning']},search_hint:{type:'string',maxLength:80},search_scope:{type:'string',enum:['local','regional']}},['kind']),
-  tool('read_map_source','Query ONE discovered source against the selected area (parcels) or matched parcel (zoning). On failure or no match, choose another discovered source. If identifierField is absent, inspect identifierFields and supply identifier_field only when its meaning identifies a parcel, not a block/lot component or generic object ID. Never choose among ambiguous parcels for the user.',{source_id:{type:'string',maxLength:60},identifier_field:{type:'string',maxLength:100}},['source_id']),
+  tool('read_map_source','Query ONE discovered source against the selected area (parcels) or matched parcel (zoning). Omit identifier_field when identifierField is supplied in discovery. It cannot be overridden. On failure or no match, choose another discovered source. Only if identifierField is absent, inspect identifierFields and supply identifier_field only when its meaning identifies a parcel, not a block/lot component or generic object ID. Never choose among ambiguous parcels for the user.',{source_id:{type:'string',maxLength:60},identifier_field:{type:'string',maxLength:100}},['source_id']),
   tool('read_planning_guidance','Follow the exact authority’s official planning navigation. Returns official guidance and published chapter links. An explicit no-zoning statement can establish that system; an empty map cannot.'),
-  tool('search_code_sections','Search the exact authority’s published code using a targeted query of your choice. Returns actual section IDs/titles and their chapter context. Search excerpts are discovery clues, not legal evidence.',{query:{type:'string',minLength:2,maxLength:120}},['query']),
+  tool('search_code_sections','Search the exact authority’s published code using a short targeted phrase, such as a use-group name or section number from the publication. Do not repeat the municipality name; the search is already scoped. Searches may require ALL query words. Returns actual section IDs/titles and their chapter context. Search excerpts are discovery clues, not legal evidence.',{query:{type:'string',minLength:2,maxLength:120}},['query']),
   tool('list_chapter_sections','List actual section titles within a published chapter link obtained from planning guidance or zoning records. Select relevant housing provisions and their exceptions.',{chapter_id:{type:'string',maxLength:60}},['chapter_id']),
   tool('read_code_sections','Retrieve original text for up to four section IDs returned by search/list tools. Returns source passage IDs for citation. You can follow up by retrieving another section.',{section_ids:{type:'array',items:{type:'string',maxLength:60},minItems:1,maxItems:4}},['section_ids']),
   tool('read_housing_context','Retrieve local ACS rental cost-burden and rent estimates, with geography, dates and uncertainty. These do not establish site demand.'),
+  tool('discover_official_sources','Discover the selected authority and county websites from verified public directories. Use when catalogue/code access fails, or to find alternate original publications. Returns opaque IDs, never invented URLs.'),
+  tool('read_official_source','Read an official website or PDF, follow its returned link IDs, or inspect a linked parcel/zoning GIS service. Choose housing provisions and their exceptions. PDF page_start is a file page number, not a printed section number; at most four pages per call. Set kind only for a GIS link.',{source_id:{type:'string',maxLength:60},page_start:{type:'integer',minimum:1,maximum:3000},kind:{type:'string',enum:['parcel','zoning']}},['source_id']),
   tool('review_evidence','Inspect retrieved facts, conflicts, missing checks and available follow-up actions before writing the assessment. This performs no new lookups.'),
 ];
 export const progressLabels={resolve_location:'Identifying the local authority…',discover_map_sources:'Finding public property sources…',read_map_source:'Checking mapped property records…',read_planning_guidance:'Checking the authority’s development guidance…',search_code_sections:'Searching relevant housing provisions…',list_chapter_sections:'Reviewing the published development code…',read_code_sections:'Reading source provisions and exceptions…',read_housing_context:'Checking local housing needs…',review_evidence:'Reviewing evidence and remaining gaps…'};
+Object.assign(progressLabels,{discover_official_sources:'Finding the authority’s official publications…',read_official_source:'Reading official records and published rules…'});
 
 export function validateToolArguments(name,args){
   const definition=researchTools.find(t=>t.function.name===name)?.function.parameters;
   if(!definition||!args||typeof args!=='object'||Array.isArray(args))throw new Error('Unknown tool or invalid arguments');
+  if(name==='search_code_sections'&&typeof args.query==='string'&&args.query.trim().split(/\s+/).length>8)throw new Error('Invalid code search: use at most eight words, focused on one provision or source phrase. Omit the city name; the publication is already scoped.');
   if(Object.keys(args).some(k=>!Object.hasOwn(definition.properties,k)))throw new Error('Unexpected tool argument');
   for(const k of definition.required)if(!Object.hasOwn(args,k))throw new Error('Missing tool argument');
   for(const [k,value] of Object.entries(args)){
     const p=definition.properties[k];
     if(p.type==='string'&&(typeof value!=='string'||value.length>(p.maxLength??200)||value.length<(p.minLength??1)||p.enum&&!p.enum.includes(value)))throw new Error('Invalid tool argument');
     if(p.type==='array'&&(!Array.isArray(value)||value.length<p.minItems||value.length>p.maxItems||value.some(v=>typeof v!=='string'||!v||v.length>p.items.maxLength)))throw new Error('Invalid tool argument');
+    if(p.type==='integer'&&(!Number.isSafeInteger(value)||value<p.minimum||value>p.maximum))throw new Error('Invalid tool argument');
   }
   return args;
 }
@@ -44,13 +51,17 @@ export function validateToolArguments(name,args){
 // Each session owns the selected geometry, accepted sources and section IDs.
 // The model chooses tools and follow-ups; it cannot supply arbitrary fetch URLs,
 // change the location, fabricate a source, or promote its prose into a record.
-export function createResearchSession(input,{read=createEvidenceClient(),now=Date.now,signal}={}){
+export function createResearchSession(input,{read=createEvidenceClient(),webRead=createPublicWebClient(),now=Date.now,signal}={}){
   const selected=selectedGeometry(input.points);
   const state={schemaVersion:2,caseId:digest(input.points).slice(0,20),generatedAt:new Date(now()).toISOString(),status:'partial',evidenceStatus:'retrieved-records',selectedArea:{geometry:selected,squareMeters:multiArea(selected)},locality:null,parcel:null,parcelCandidates:[],zones:[],housing:null,sources:[],gaps:[],code:[],assessment:null,checks:[],capacity:null,codeAccess:[],planningSystem:{type:'unresolved',sources:[],codeLinks:[]}};
   const sourceRead=(target,options={})=>read(target,{...options,signal});
   const layers=new Map(),sections=new Map(),chapters=new Map(),checks=new Map();
   const discoveredKinds=new Set(),regionalKinds=new Set();
-  const completed=new Set(),sourceAttempts=new Map(),conflicts=[];let codeCatalog,publishedCodes,chapterTruncated=false;
+  const completed=new Set(),sourceAttempts=new Map(),conflicts=[];let codeCatalog,publishedCodes,officialPages,chapterTruncated=false,webReads=0,locationAttempts=0;
+  state.retrievalFailures=[];
+  const official=()=>officialPages??=createOfficialSession({locality:state.locality,read:sourceRead,webRead,signal});
+  const recordFailure=(name,url,error)=>{const f={name,url,...sourceFailure(error)};if(!state.retrievalFailures.some(e=>e.name===name&&e.url===url))state.retrievalFailures.push(f);};
+  const linkedRead=async(target,options={})=>{const r=await webRead(target,{...options,signal});const data=JSON.parse(Buffer.from(r.data).toString('utf8'));if(data.error)throw new Error('Source query failed');return {...r,data};};
   const published=()=>publishedCodes??=createPublishedCodeSession(sourceRead,state.locality);
   const addSource=s=>{const at=state.sources.findIndex(v=>v.id===s.id);if(at<0)state.sources.push(s);else state.sources[at]=s;};
   const requireLocal=()=>{if(!state.locality)throw new Error('Resolve the selected location first');};
@@ -75,6 +86,18 @@ export function createResearchSession(input,{read=createEvidenceClient(),now=Dat
   };
   const snapshot=()=>{
     const result=structuredClone(state),gaps=[];
+    for(const source of result.sources){
+      const columns=source.tableDistricts??[];
+      if(columns.length&&result.zones.length&&!result.zones.some(z=>columns.some(c=>z.id===c||z.id.startsWith(c+'-'))))source.scopeConflict='The table columns are '+columns.join(', ')+', not the mapped districts '+result.zones.map(z=>z.id).join(', ')+'. Do not use this table to infer housing permission for the selected site.';
+    }
+    const target=result.parcel?.geometry??selected;
+    const zoneUnion=union(result.zones.map(z=>z.geometry));
+    result.spatial={selectedParcelCoverage:result.parcel?Math.min(1,overlapArea(selected,target)/multiArea(selected)):null,
+      selectedZoningCoverage:Math.min(1,overlapArea(selected,zoneUnion)/multiArea(selected)),
+      zones:result.zones.map(z=>({id:z.id,parcelSquareMeters:overlapArea(z.geometry,target),selectedSquareMeters:overlapArea(z.geometry,selected),geometry:intersect(z.geometry,target)}))};
+    // Clip the display geometry to the researched site, retaining the original
+    // source query and hashes as provenance. Never create a buildable envelope.
+    result.zones=result.zones.map(z=>({...z,geometry:intersect(z.geometry,target)}));
     const gap=(id,title,detail,next)=>gaps.push({id,title,detail,next});
     if(!result.locality)gap('jurisdiction','The local authority remains unresolved','The connected geographic lookup has not established the selected jurisdiction.','Retry the lookup or confirm the local authority.');
     else if(result.locality.authorityUnresolved)gap('authority','The governing authority remains unresolved','Census identifies a statistical or nonfunctioning county area; it is not proof of a local planning government.','Identify the relevant state, tribal or local authority before applying development rules.');
@@ -84,6 +107,7 @@ export function createResearchSession(input,{read=createEvidenceClient(),now=Dat
       if(result.parcelCandidates.length)gap('parcel-match','First, confirm the parcel','More than one property intersects the outline, or the previous match changed.','Choose a parcel below. Their capacities have not been combined.');
       else gap('parcel','A reliable parcel match remains unresolved',checks.get('Parcel')==='source-error'?'The connected parcel query failed; this does not establish that no record exists.':'No usable authoritative parcel match has been retrieved. The blue outline remains an exploration area.','Retry the lookup or obtain the local assessor record.');
     }
+    if(result.retrievalFailures.length){const detail=result.retrievalFailures.slice(0,3).map(e=>`${e.name}: ${e.status.replaceAll('-',' ')}`).join('; ');gap('retrieval','Some sources could not be read',detail+'. Available records have been retained.','Use the linked official source or retry later; missing retrieval is not evidence of no records.');}
     if(!result.zones.length&&result.planningSystem.type!=='no-zoning')gap('zoning','The local planning controls remain unresolved','No zoning match or explicit official alternative planning system has been established.','Confirm the applicable controls with the local authority.');
     if(result.zones.length>1)gap('split-zoning','The site intersects multiple zoning districts','One district’s rules cannot be applied to the whole parcel.','Confirm the rules for the intended housing area.');
     if(result.zones.length&&result.zoningCoverage<.98)gap('zoning-coverage','The zoning map does not cover the whole site','Some of the mapped parcel remains unresolved.','Confirm the missing designation.');
@@ -102,65 +126,90 @@ export function createResearchSession(input,{read=createEvidenceClient(),now=Dat
     result.caseId=digest({points:input.points,parcel:result.parcel?.key,sources:result.sources.map(s=>s.hash)}).slice(0,20);return result;
   };
   const requiredFollowUps=()=>{
-    if(!state.locality)return completed.has('resolve_location')?[]:['resolve_location'];
+    if(!state.locality)return locationAttempts<2?['resolve_location']:[];
     if(state.parcelCandidates.length&&!state.parcel)return [];
     const required=[];
     if(!discoveredKinds.has('parcel'))required.push('discover_map_sources: discover parcel sources');
     for(const kind of ['parcel','zoning']){
       const missing=kind==='parcel'?!state.parcel:!state.zones.length&&state.planningSystem.type!=='no-zoning';
       const untried=[...layers].some(([id,l])=>l.kind===kind&&!sourceAttempts.has(id));
-      if(missing&&discoveredKinds.has(kind)&&!regionalKinds.has(kind)&&!untried)required.push(`discover_map_sources: retry ${kind} with search_scope regional after local discovery/query returned no usable match`);
+      const attempts=[...layers].filter(([id,l])=>l.kind===kind&&sourceAttempts.has(id)).length;
+      if(missing&&discoveredKinds.has(kind)&&!regionalKinds.has(kind)&&(!untried||attempts>=2))required.push(`discover_map_sources: retry ${kind} with search_scope regional after local discovery/query returned no usable match`);
     }
     if(!discoveredKinds.has('zoning')&&state.planningSystem.type!=='no-zoning')required.push('discover_map_sources: discover zoning sources');
-    if([...layers].some(([id,l])=>l.kind==='zoning'&&!sourceAttempts.has(id))&&!state.zones.length&&state.planningSystem.type!=='no-zoning')required.push('read_map_source: query a discovered zoning source');
-    if([...layers].some(([id,l])=>l.kind==='parcel'&&!sourceAttempts.has(id))&&!state.parcel)required.push('read_map_source: query a discovered parcel source');
+    const attempted=kind=>[...layers].filter(([id,l])=>l.kind===kind&&sourceAttempts.has(id)).length;
+    if([...layers].some(([id,l])=>l.kind==='zoning'&&!sourceAttempts.has(id))&&attempted('zoning')<2&&!state.zones.length&&state.planningSystem.type!=='no-zoning')required.push('read_map_source: query a discovered zoning source');
+    if([...layers].some(([id,l])=>l.kind==='parcel'&&!sourceAttempts.has(id))&&attempted('parcel')<2&&!state.parcel)required.push('read_map_source: query a discovered parcel source');
     if(!completed.has('read_planning_guidance'))required.push('read_planning_guidance');
-    if(!completed.has('read_housing_context'))required.push('read_housing_context');
+    // Housing context is optional; it must not delay parcel/use research.
+    if((!state.parcel||!state.code.length)&&!state.locality.authorityUnresolved){
+      if(!completed.has('discover_official_sources'))required.push('discover_official_sources: recover missing parcel or code evidence through official websites');
+      else if(webReads<6&&officialPages?.choices().some(e=>!e.read))required.push('read_official_source: follow a relevant unread government or publication link to recover missing records. Prefer original ordinances or planning departments over overview pages.');
+    }
     if(!state.locality.boundaryUncertain&&!state.code.length){
       if(!completed.has('search_code_sections')&&!completed.has('list_chapter_sections'))required.push('search_code_sections or list_chapter_sections: original housing provisions are still needed');
       else if(sections.size||(publishedCodes?.needsRead()??false))required.push('read_code_sections: search titles are not evidence');
     }
+    const codeSources=snapshot().sources.filter(s=>s.kind==='code-provision');
+    if(codeSources.some(s=>s.scopeConflict)&&!codeSources.some(s=>s.tableDistricts?.length&&!s.scopeConflict))required.push('search_code_sections or read_code_sections: retrieved district tables do not cover the mapped districts. Navigate to the correct district family and read its operative housing allowances.');
     if(chapterTruncated&&!completed.has('search_code_sections'))required.push('search_code_sections: chapter listing was truncated; search for operative housing and development-approval provisions');
     return required;
   };
   const context=()=>{
     const r=snapshot();let chars=0;
-    return {status:r.status,assessmentScope:r.assessmentScope,locality:r.locality,selectedSquareMeters:r.selectedArea.squareMeters,parcel:r.parcel?{id:r.parcel.id,address:r.parcel.address,mappedSquareMeters:r.parcel.mappedSquareMeters}:null,parcelCandidates:r.parcelCandidates.map(p=>({id:p.id,key:p.key,address:p.address})),zoning:r.zones.map(z=>({id:z.id,description:z.description})),planningSystem:r.planningSystem.type,housing:r.housing,unresolved:r.gaps,checks:r.checks,completedTools:[...completed],requiredFollowUps:requiredFollowUps(),sources:r.sources.filter(s=>['code-provision','planning-guidance'].includes(s.kind)).filter(s=>{chars+=s.text.length;return chars<=65000;}).map(s=>({id:s.id,title:s.title,url:s.url,publication:s.publication,truncated:s.truncated,passages:evidencePassages(s)})),availableMapSources:[...layers].map(([source_id,l])=>({source_id,kind:l.kind,title:l.item.title,lastOutcome:sourceAttempts.get(source_id)??'not-queried'}))};
+    return {status:r.status,assessmentScope:r.assessmentScope,locality:r.locality,selectedSquareMeters:r.selectedArea.squareMeters,parcel:r.parcel?{id:r.parcel.id,address:r.parcel.address,mappedSquareMeters:r.parcel.mappedSquareMeters,attributes:r.parcel.attributes}:null,spatial:r.spatial,parcelCandidates:r.parcelCandidates.map(p=>({id:p.id,key:p.key,address:p.address})),zoning:r.zones.map(z=>({id:z.id,description:z.description})),planningSystem:r.planningSystem.type,housing:r.housing,unresolved:r.gaps,checks:r.checks,completedTools:[...completed],requiredFollowUps:requiredFollowUps(),sources:r.sources.filter(s=>['code-provision','planning-guidance','mapped-record'].includes(s.kind)).filter(s=>{chars+=s.text.length;return chars<=65000;}).map(s=>({id:s.id,title:s.title,url:s.url,publication:s.publication,truncated:s.truncated,scopeConflict:s.scopeConflict,tableDistricts:s.tableDistricts,passages:evidencePassages(s)})),availableMapSources:[...layers].map(([source_id,l])=>({source_id,kind:l.kind,title:l.item.title,lastOutcome:sourceAttempts.get(source_id)??'not-queried'}))};
   };
   const execute=async(name,args={})=>{
     validateToolArguments(name,args);signal?.throwIfAborted();completed.add(name);
     if(name==='resolve_location'){
+      if(locationAttempts>=2)return {status:'unavailable',note:'Location retry budget exhausted. No substitute location may be used.'};locationAttempts++;
       const found=await locate(sourceRead,input.points);if(!found){checks.set('Jurisdiction','unavailable');return {status:'unavailable',coverage:'Connected geographic lookup covers U.S. jurisdictions. Do not substitute a city.'};}
       state.locality=found.locality;addSource(found.evidence);checks.set('Jurisdiction',found.locality.boundaryUncertain?'needs-review':'retrieved');return {locality:state.locality,source:found.evidence};
     }
     if(name==='review_evidence')return context();
     requireLocal();
+    if(name==='discover_official_sources'){
+      const result=await official().discover();for(const f of result.failures)if(!state.retrievalFailures.some(e=>e.url===f.url))state.retrievalFailures.push({name:'Official website discovery',...f});return result;
+    }
+    if(name==='read_official_source'){
+      webReads++;const result=await official().inspect(args.source_id,args.page_start??1);
+      if(result.mapSource){
+        if(!args.kind)return {status:'kind-needed',note:'This is a mapped service. Choose kind parcel or zoning according to the link and service metadata.'};
+        const e=result.mapSource;
+        const found=await discoverLayers(linkedRead,state.locality,input.points,args.kind,'','local',[{id:digest(e.url).slice(0,32),url:e.url,title:e.title,authorityProof:e.proof,sourcePage:e.proof.at(-1)?.url??e.url}]);
+        return {sources:found.map(l=>{const id=`${args.kind}-${digest(l.url).slice(0,16)}`;layers.set(id,{...l,kind:args.kind,linked:true});return {source_id:id,kind:args.kind,title:l.meta.name||l.item.title,identifierField:l.identifierField,identifierFields:l.identifierField?[]:l.identifierFields};}),discovery:found.diagnostics,note:'Query a returned map source to establish an actual parcel or zoning match.'};
+      }
+      for(const s of result.sources??[]){addSource(s);if(s.kind==='code-provision'&&!state.code.includes(s.id))state.code.push(s.id);}
+      if(result.sources?.length)checks.set('Official publications','retrieved');
+      if(['access-blocked','rate-limited','timed-out','source-error','not-found','source-too-large','unreadable-document'].includes(result.status)&&!state.retrievalFailures.some(f=>f.url===result.url))state.retrievalFailures.push({name:'Official publication',url:result.url,status:result.status,message:result.message});
+      return {...result,sources:(result.sources??[]).map(s=>({...s,passages:evidencePassages(s)}))};
+    }
     if(name==='discover_map_sources'){
       discoveredKinds.add(args.kind);if(args.search_scope==='regional')regionalKinds.add(args.kind);
       const found=await discoverLayers(sourceRead,state.locality,input.points,args.kind,args.search_hint??'',args.search_scope??'local');
-      return {kind:args.kind,discovery:found.diagnostics,sources:found.map(l=>{const id=`${args.kind}-${digest(l.url).slice(0,16)}`;layers.set(id,{...l,kind:args.kind});return {source_id:id,kind:args.kind,title:l.item.title,publisher:l.publisher,url:l.url,identifierField:l.identifierField,identifierFields:l.identifierFields,lastOutcome:sourceAttempts.get(id)??'not-queried'};}),note:found.length?'Choose a source of this kind and read it. Catalogue metadata alone does not establish a property match.':`No verified ${args.kind} source was discovered. Sources of a different kind cannot fill this gap. Use official planning guidance or another search hint.`};
+      return {kind:args.kind,discovery:found.diagnostics,sources:found.map(l=>{const id=`${args.kind}-${digest(l.url).slice(0,16)}`;layers.set(id,{...l,kind:args.kind});return {source_id:id,kind:args.kind,title:l.item.title,publisher:l.publisher,url:l.url,identifierField:l.identifierField,identifierFields:l.identifierField?[]:l.identifierFields,lastOutcome:sourceAttempts.get(id)??'not-queried'};}),note:found.length?'Choose a source of this kind and read it. Catalogue metadata alone does not establish a property match.':`No verified ${args.kind} source was discovered. Sources of a different kind cannot fill this gap. Use official planning guidance or another search hint.`};
     }
     if(name==='read_map_source'){
       const layer=layers.get(args.source_id);if(!layer)throw new Error('Choose a source ID returned by discovery');
       if(args.identifier_field){
-        if(args.identifier_field!==layer.identifierField&&(layer.kind!=='parcel'||!layer.identifierFields.some(f=>f.name===args.identifier_field)))throw new Error(`Choose ${layer.identifierField?`identifier_field ${layer.identifierField}, or omit identifier_field`:'a parcel identifier field from this source metadata'}. Do not use a parcel number as a field name.`);
+        if(args.identifier_field!==layer.identifierField&&(layer.identifierField||layer.kind!=='parcel'||!layer.identifierFields.some(f=>f.name===args.identifier_field)))throw new Error(`Choose ${layer.identifierField?`identifier_field ${layer.identifierField}, or omit identifier_field`:'a parcel identifier field from this source metadata'}. Do not use a parcel number as a field name.`);
         layer.identifierField=args.identifier_field;
       }
       if(layer.kind==='parcel'&&!layer.identifierField){sourceAttempts.set(args.source_id,'identifier-needed');return {status:'identifier-needed',identifierFields:layer.identifierFields,followUp:'Inspect these source fields and choose a supported parcel identifier using identifier_field. If none is clear, try another source.'};}
       const kind=layer.kind,target=kind==='parcel'?selected:state.parcel?.geometry??selected,diagnostics={};
-      const found=await readSpatial(sourceRead,[layer],target,kind,diagnostics);
+      const found=await readSpatial(layer.linked?linkedRead:sourceRead,[layer],target,kind,diagnostics);
       const status=found?'retrieved':diagnostics.failedQueries?'source-error':diagnostics.unsupportedQueries?'unsupported-record-format':'no-match';sourceAttempts.set(args.source_id,status);
-      if(!found){if(kind==='parcel'&&!state.parcel)checks.set('Parcel',status);return {status,followUp:'Try a different discovered source or another search hint. Do not infer that the property or rules do not exist.'};}
+      if(!found){if(kind==='parcel'&&!state.parcel)checks.set('Parcel',status);for(const failure of diagnostics.failures??[])recordFailure(kind==='parcel'?'Parcel service':'Zoning service',layer.url,new Error(failure));return {status,failures:diagnostics.failures,followUp:'Try another discovered source. If the catalogue fails, discover_official_sources and follow the assessor or state GIS links. Do not infer no property or no rules.'};}
       if(kind==='parcel'){
-        if(state.parcel&&found.records.every(r=>r.id!==state.parcel.id)){conflicts.push('A queried parcel source disagrees with the retained match.');return {status:'conflict',note:'This source disagrees with the current parcel match. The existing match is retained; do not claim agreement.',candidates:found.records.map(r=>({id:r.id,address:r.address}))};}
+        if(state.parcel){const same=found.records.find(r=>overlapArea(r.geometry,state.parcel.geometry)/Math.max(r.mappedSquareMeters,state.parcel.mappedSquareMeters)>.98);if(!same){conflicts.push('A queried parcel source disagrees geometrically with the retained match.');return {status:'conflict',note:'Boundary evidence disagrees with the retained match. Do not combine or silently replace parcels.',candidates:found.records.map(r=>({id:r.id,address:r.address}))};}return {status:'corroborated',note:'Mapped boundaries closely agree; identifiers can differ across publishers. This is not a legal survey.',source:found.evidence};}
         const oldKey=state.parcel?.key;state.parcelCandidates=found.records.slice(0,20);
         state.parcel=input.parcelKey?found.records.find(p=>p.key===input.parcelKey)??null:found.records.length===1?found.records[0]:null;
         if(oldKey!==state.parcel?.key){for(const [id,l] of layers)if(l.kind==='zoning')sourceAttempts.delete(id);state.zones=[];checks.delete('Planning system');delete state.zoningCoverage;state.sources=state.sources.filter(s=>s.id!=='zoning');}
         addSource(found.evidence);checks.set('Parcel',state.parcel?'retrieved':'needs-review');
-        return {status:state.parcel?'matched':'needs-user-choice',zoningRecheckRequired:oldKey!==state.parcel?.key,parcel:state.parcel?{id:state.parcel.id,address:state.parcel.address,mappedSquareMeters:state.parcel.mappedSquareMeters}:null,candidates:state.parcelCandidates.map(p=>({id:p.id,key:p.key,address:p.address,mappedSquareMeters:p.mappedSquareMeters})),source:{id:found.evidence.id,url:found.evidence.url,publisher:found.evidence.publisher}};
+        return {status:state.parcel?'matched':'needs-user-choice',zoningRecheckRequired:oldKey!==state.parcel?.key,parcel:state.parcel?{id:state.parcel.id,address:state.parcel.address,mappedSquareMeters:state.parcel.mappedSquareMeters,attributes:state.parcel.attributes}:null,candidates:state.parcelCandidates.map(p=>({id:p.id,key:p.key,address:p.address,mappedSquareMeters:p.mappedSquareMeters})),source:{id:found.evidence.id,url:found.evidence.url,publisher:found.evidence.publisher}};
       }
       state.zones=found.records;state.zoningCoverage=Math.min(1,overlapArea(union(found.records.map(z=>z.geometry)),target)/multiArea(target));addSource(found.evidence);checks.set('Planning system','zoning-map-retrieved');
-      return {zones:found.records.map(z=>({id:z.id,description:z.description,attributes:z.attributes})),coverage:state.zoningCoverage,chapters:registerChapters(),source:{id:found.evidence.id,url:found.evidence.url}};
+      return {zones:found.records.map(z=>({id:z.id,description:z.description,attributes:z.attributes})),coverage:state.zoningCoverage,spatial:snapshot().spatial,chapters:registerChapters(),source:{id:found.evidence.id,url:found.evidence.url}};
     }
     if(name==='read_planning_guidance'){
       state.planningSystem=await planningContext(sourceRead,state.locality);for(const s of state.planningSystem.sources)addSource(s);checks.set('Planning guidance',state.planningSystem.sources.length?'retrieved':'unresolved');
@@ -192,7 +241,7 @@ export function createResearchSession(input,{read=createEvidenceClient(),now=Dat
     }
     if(name==='read_code_sections'){
       const result=[];for(const id of args.section_ids){
-        if(publishedCodes?.has(id)){const page=await publishedCodes.read(id);for(const source of page.sources){addSource(source);if(!state.code.includes(source.id))state.code.push(source.id);result.push({...source,passages:evidencePassages(source)});}if(page.sections.length)result.push({navigation:page.sections,note:page.note});if(page.status==='source-unavailable')result.push({status:page.status,url:page.url,message:page.message});continue;}
+        if(publishedCodes?.has(id)){const page=await publishedCodes.read(id);for(const source of page.sources){addSource(source);if(!state.code.includes(source.id))state.code.push(source.id);result.push({id:source.id,title:source.title,url:source.url,tableDistricts:source.tableDistricts,publication:source.publication,truncated:source.truncated,passages:evidencePassages(source)});}if(page.sections.length)result.push({navigation:page.sections,note:page.note});if(page.status==='source-unavailable')result.push({status:page.status,url:page.url,message:page.message});continue;}
         const entry=sections.get(id);if(!entry)throw new Error('Choose section IDs returned by code search or chapter listing');
         const response=await sourceRead(url(`${muni}/CodesContent`,{productId:entry.product.ProductID,jobId:entry.job.Id,nodeId:entry.node,groupChunks:'false'}));
         for(const doc of response.data.Docs??[]){
@@ -210,15 +259,16 @@ export function createResearchSession(input,{read=createEvidenceClient(),now=Dat
   };
   const toolDefinitions=()=>researchTools.flatMap(definition=>{
     const t=structuredClone(definition),name=t.function.name,properties=t.function.parameters.properties;
-    const ids=name==='read_map_source'?[...layers.keys()]:name==='read_code_sections'?[...sections.keys(),...(publishedCodes?.ids()??[])]:name==='list_chapter_sections'?[...chapters.keys()]:null;
-    if(ids){if(!ids.length)return [];if(name==='read_code_sections')properties.section_ids.items.enum=ids;else properties[name==='read_map_source'?'source_id':'chapter_id'].enum=ids;}
+    const ids=name==='read_map_source'?[...layers.keys()]:name==='read_official_source'?(officialPages?.choices().map(e=>e.source_id)??[]):name==='read_code_sections'?[...sections.keys(),...(publishedCodes?.ids()??[])]:name==='list_chapter_sections'?[...chapters.keys()]:null;
+    if(ids){if(!ids.length)return [];if(name==='read_code_sections')properties.section_ids.items.enum=ids;else properties[name==='read_map_source'||name==='read_official_source'?'source_id':'chapter_id'].enum=ids;}
     if(name==='read_map_source'){
-      const fields=[...new Set([...layers.values()].flatMap(l=>l.kind==='parcel'?l.identifierFields.map(f=>f.name):[l.identifierField]).filter(Boolean))];
+      const fields=[...new Set([...layers.values()].flatMap(l=>l.identifierField?[l.identifierField]:l.identifierFields.map(f=>f.name)).filter(Boolean))];
       if(fields.length)properties.identifier_field.enum=fields;else delete properties.identifier_field;
     }
-    if(name==='resolve_location'&&state.locality)return [];
+    if(name==='resolve_location'&&(state.locality||locationAttempts>=2))return [];
     return [t];
   });
-  const toolCacheKey=(name,args)=>name==='read_map_source'&&layers.get(args.source_id)?.kind==='zoning'?(state.parcel?.key??'selected-area'):'';
-  return {execute,snapshot,context,requiredFollowUps,toolDefinitions,toolCacheKey};
+  const toolCacheKey=(name,args)=>name==='resolve_location'?String(locationAttempts):name==='read_map_source'&&layers.get(args.source_id)?.kind==='zoning'?(state.parcel?.key??'selected-area'):'';
+  const toolLane=(name,args)=>name==='resolve_location'||name==='review_evidence'?'exclusive':name==='read_map_source'?'geometry':/code|chapter/.test(name)?'code':/official/.test(name)?'official':name==='discover_map_sources'?'discovery-'+args.kind:name;
+  return {execute,snapshot,context,requiredFollowUps,toolDefinitions,toolCacheKey,toolLane};
 }

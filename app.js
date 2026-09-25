@@ -15,7 +15,7 @@ function updateButton() {
 
 async function startVideo() {
   // Muted inline autoplay is explicitly requested. The visible pause control remains available.
-  if (userPaused || document.hidden || !inView || video.ended) return;
+  if (userPaused || document.hidden || !inView || root.classList.contains('findings-active') || video.ended) return;
   video.muted = true;
   try { await video.play(); } catch { /* Browser policy can require the visible Play control. */ }
   updateButton();
@@ -26,6 +26,8 @@ video.addEventListener('loadeddata', () => {
   motionButton.hidden = false;
   startVideo();
 }, { once: true });
+video.addEventListener('play',()=>{if(root.classList.contains('findings-active'))video.pause();});
+document.addEventListener('steadmorrow:step',()=>{if(root.classList.contains('findings-active'))video.pause();else startVideo();});
 ['play', 'pause', 'ended'].forEach(event => video.addEventListener(event, updateButton));
 video.addEventListener('error', () => {
   root.classList.remove('video-ready');
@@ -56,5 +58,5 @@ document.querySelectorAll('a[href="#experience"]').forEach(link => {
   });
 });
 
-// Get started and the headline remain visible throughout playback.
+// Hide/pause the marketing scene whenever the findings workspace is active.
 startVideo();

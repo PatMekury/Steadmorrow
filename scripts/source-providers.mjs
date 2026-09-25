@@ -19,7 +19,7 @@ export const catalogueConnections=[
  {cityId:'3651000',kind:'zoning',itemId:'788dcf4c61e34757bad1e015cb5f4111',authority:'https://www.arcgis.com/sharing/rest/portals/GfwWNkhOj9bNBqoJ?f=json',publisher:'NYC Department of City Planning'},
 ];
 export const publishedCodeConnections=[
- {cityId:'3651000',root:'https://zr.planning.nyc.gov/',publisher:'New York City Planning · Zoning Resolution',authority:'https://zr.planning.nyc.gov/'},
+ {cityId:'3651000',root:'https://zoningresolution.planning.nyc.gov/',searchPath:'/search',searchParameter:'search_term',publisher:'New York City Planning · Zoning Resolution',authority:'https://zoningresolution.planning.nyc.gov/'},
  {cityId:'3405740',root:'https://ecode360.com/BE3153',publisher:'City of Beverly, New Jersey · General Code',authority:'https://thecityofbeverly.com/ordinances'},
 ];
 export const connectionMatches=(connection,locality)=>Boolean(connection.cityId?connection.cityId===locality.cityId:connection.stateId===locality.stateId);

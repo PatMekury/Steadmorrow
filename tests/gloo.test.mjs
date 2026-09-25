@@ -6,7 +6,7 @@ const input=()=>({points:[{lat:29.76,lng:-95.37},{lat:29.76,lng:-95.369},{lat:29
 const quote='Residential uses require approval under the conditions of this section.';
 const evidence=()=>({schemaVersion:2,caseId:'fixture-records',status:'preliminary',assessmentScope:'matched-site',code:['code-1'],parcel:{id:'parcel-A',mappedSquareMeters:1000},zones:[{id:'R'}],locality:{label:'Fixture authority',boundaryUncertain:false},gaps:[{id:'access',title:'Access remains unresolved'}],sources:[{id:'code-1',kind:'code-provision',text:quote,title:'Residential uses'}]});
 const support=[{sourceId:'code-1',passageId:'code-1-p1'}];
-const answer=()=>({assessment:{headline:'Approval conditions need review.',summary:'The retrieved provision requires approval; site access remains unresolved.',support},findings:[{heading:'An approval is required',summary:'Confirm the applicable approval conditions.',support}],obstacles:[{heading:'Approval conditions',consequence:'An approval has not been established.',nextStep:'Confirm this provision with the planning authority.',support}]});
+const answer=()=>({housingRoute:'supported',assessment:{headline:'Approval conditions need review.',summary:'The retrieved provision requires approval; site access remains unresolved.',support},findings:[{heading:'An approval is required',summary:'Confirm the applicable approval conditions.',support}],obstacles:[{heading:'Approval conditions',consequence:'An approval has not been established.',nextStep:'Confirm this provision with the planning authority.',support}]});
 const payload=(a=answer())=>({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:JSON.stringify(a)}]}]});
 const call=(name,args={},id=name)=>({type:'function_call',call_id:id,name,arguments:JSON.stringify(args)});
 const response=output=>new Response(JSON.stringify({status:'completed',output}));
@@ -49,7 +49,7 @@ test('deduplication shares the agent run; daily budget counts every model reques
  await assert.rejects(review({...input(),query:'Changed input'}),e=>e.status===429&&/budget/.test(e.message));assert.equal(calls,2);
 });
 test('ambiguous parcels or unstable jurisdiction never receive a ready site assessment',async()=>{
- for(const change of [{status:'needs-parcel'},{locality:{boundaryUncertain:true}},{code:[]}]){const review=createFindingsService(options({sessionFactory:()=>({execute:async()=>({}),snapshot:()=>({...evidence(),...change})})}));assert.equal((await review(input())).narrativeStatus,'not-ready');}
+ for(const change of [{status:'needs-parcel'},{locality:{boundaryUncertain:true}},{code:[]}]){const review=createFindingsService(options({sessionFactory:()=>({execute:async()=>({}),snapshot:()=>({...evidence(),...change})})}));assert.equal((await review(input())).narrativeStatus,change.code?'partial':'not-ready');}
 });
 test('upstream failure and timeout preserve acquired evidence, make no automatic transport retry and expose no upstream body',async()=>{
  for(const fetchImpl of [async()=>new Response('private upstream body',{status:503}),async(_u,{signal})=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}))]){
@@ -101,4 +101,27 @@ test('zoning tool memoization changes with parcel geometry and cannot reuse the 
   turn++;if(turn===1||turn===3)return response([call('read_map_source',{source_id:'zone'},'zone-'+turn)]);
   if(turn===2)return response([call('resolve_location')]);if(turn===4)return response([call('review_evidence')]);return new Response(JSON.stringify(payload()));
  }}));assert.equal((await review(input())).narrativeStatus,'ready');assert.equal(reads,2);
+});
+
+test('readable code with an admitted missing use allowance prompts Gloo to choose a focused recovery',async()=>{
+ let turn=0;const executed=[];
+ const review=createFindingsService(options({sessionFactory:()=>({snapshot:evidence,execute:async name=>{executed.push(name);return {};}}),fetchImpl:async(_u,opts)=>{
+  turn++;if(turn===1||turn===4)return response([call('review_evidence')]);
+  if(turn===2)return new Response(JSON.stringify(payload({...answer(),housingRoute:'unresolved'})));
+  if(turn===3){assert.match(JSON.stringify(JSON.parse(opts.body).input),/Do not hand that routine lookup back/);return response([call('read_code_sections',{section_ids:['known-use-table']})]);}
+  return new Response(JSON.stringify(payload()));
+ }}));
+ const r=await review(input());assert.equal(r.narrativeStatus,'ready');assert.deepEqual(executed,['review_evidence','read_code_sections','review_evidence']);
+});
+
+test('a late subscriber receives acquired evidence immediately and a later model failure retains it',async()=>{
+ let acquired=false,turn=0,release,arrived;
+ const waiting=new Promise(r=>arrived=r),blocked=new Promise(r=>release=r),progress=[];
+ const review=createFindingsService(options({sessionFactory:()=>({snapshot:()=>acquired?evidence():{...evidence(),parcel:null,sources:[],code:[]},execute:async()=>{acquired=true;return {};}}),fetchImpl:async()=>{
+  if(++turn===1)return response([call('read_map_source',{source_id:'parcel'})]);arrived();await blocked;return new Response('private upstream response',{status:503});
+ }}));
+ const first=review(input());await waiting;
+ const second=review(input(),{onProgress:e=>progress.push(e)});
+ assert.equal(progress[0].evidence.parcel.id,'parcel-A');release();
+ const [a,b]=await Promise.all([first,second]);assert.deepEqual(a,b);assert.equal(a.parcel.id,'parcel-A');assert.equal(a.narrativeStatus,'unavailable');assert.equal(turn,2);
 });
