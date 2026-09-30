@@ -46,6 +46,7 @@ export const canDrawHousing = (result, scenario) => Boolean(
   !(scenario.concept.evidenceVersion&&result.caseId&&scenario.concept.evidenceVersion!==result.caseId) &&
   scenario.concept.allowed !== false && result?.housingRoute !== 'prohibited' && result?.scenarioEligibility?.allowed !== false &&
   !(scenario.assessmentVersion && result?.version?.assessment && scenario.assessmentVersion !== result.version.assessment) &&
+  !(scenario.concept.roadContextVersion && scenario.concept.roadContextVersion !== contextOf(result).renderVersion) &&
   !(scenario.concept.contextVersion && contextOf(result).geometryVersion && scenario.concept.contextVersion !== contextOf(result).geometryVersion)
 );
 
@@ -87,12 +88,12 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
   };
   const areaMaterial = makeMaterial({color:'#d9dfd2',transparent:true,opacity:.38,depthWrite:false});
   const selectionMaterial = makeMaterial({color:'#9ec9ef',transparent:true,opacity:.56,depthWrite:false});
-  const proposalMaterial = makeMaterial({color:'#e8e3d7',roughness:.88,transparent:false});
-  const glazingMaterial=makeMaterial({color:'#52757b',roughness:.38,metalness:.12,side:THREE.DoubleSide});
-  const roofMaterial=makeMaterial({color:'#c9d1c5',roughness:.95});
+  const proposalMaterial = makeMaterial({color:'#f1f0e9',roughness:.88,transparent:false});
+  const glazingMaterial=makeMaterial({color:'#adbfbe',roughness:.38,metalness:.12,side:THREE.DoubleSide});
+  const roofMaterial=makeMaterial({color:'#4d9bc6',roughness:.95});
   const sillMaterial=makeMaterial({color:'#f1ede3',roughness:.95});
-  const roadMaterial = new THREE.MeshBasicMaterial({color:'#bacdd5',side:THREE.DoubleSide}); materials.add(roadMaterial);
-  const vergeMaterial = new THREE.MeshBasicMaterial({color:'#e1e8eb',side:THREE.DoubleSide});materials.add(vergeMaterial);
+  const roadMaterial = new THREE.MeshBasicMaterial({color:'#d9ddda',side:THREE.DoubleSide}); materials.add(roadMaterial);
+  const vergeMaterial = new THREE.MeshBasicMaterial({color:'#e9ebe6',side:THREE.DoubleSide});materials.add(vergeMaterial);
   const whiteHandle = makeMaterial({color:'#ffffff'});
   const darkHandle = makeMaterial({color:'#4d514d'});
   const outlineMaterial = new THREE.LineBasicMaterial({color:BLUE,depthTest:false}); materials.add(outlineMaterial);
@@ -214,9 +215,9 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
     if(pendingFit)moveCamera(focusMode);
     const moving=controls?.update()??false;
     if(revealStart){
-      const t=Math.min(1,(now-revealStart)/680),e=1-(1-t)**3;
-      proposalGroup.scale.y=Math.max(.015,e);
-      if(t<1)requestRender();else{revealStart=0;proposalGroup.scale.y=1;}
+      const t=Math.min(1,(now-revealStart)/260);
+      proposalGroup.traverse(n=>{if(n.material&&n.userData.revealMaterial)n.material.opacity=.55+.45*t;});
+      if(t<1)requestRender();else{revealStart=0;proposalGroup.traverse(n=>{if(n.userData.revealMaterial){n.material.opacity=1;n.material.transparent=false;}});}
     }
     renderer.render(world,camera);
     if(!readyReported){readyReported=true;onReady?.({mode:view,fallback:false});}
@@ -229,11 +230,11 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
     if(disposed)return;
     const nextWidth=host.clientWidth,nextHeight=host.clientHeight;
     if(!host.isConnected||nextWidth<2||nextHeight<2)return;
-    const firstMeasurement=!hasMeasuredSize;
+    const firstMeasurement=!hasMeasuredSize,changedAspectClass=(width<600)!==(nextWidth<600)&&!cameraTouched;
     width=nextWidth;height=nextHeight;hasMeasuredSize=true;
     if(renderer){
       renderer.setSize(width,height,false);
-      if(firstMeasurement)moveCamera(focusMode);else setProjection();
+      if(firstMeasurement||changedAspectClass)moveCamera(focusMode);else setProjection();
       requestRender();
     }
   }
@@ -276,7 +277,8 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
         points.push(project(p));points.push(project(p,mesh.userData.feature.displayHeightMeters??0));
       }
     }
-    if(canDrawHousing(currentResult,currentScenario))for(const b of currentScenario.concept.buildings)for(const p of allPoints(b.geometry)) {
+    const comparison=(currentScenario?.options?.length?currentScenario.options.map(o=>({...currentScenario,concept:o.concept,activeOptionId:o.id})):[currentScenario]).filter(v=>canDrawHousing(currentResult,v));
+    for(const variant of comparison)for(const b of variant.concept.buildings)for(const p of allPoints(b.geometry)) {
       points.push(project(p));points.push(project(p,b.height||0));
     }
     return points;
@@ -291,9 +293,11 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
     // View across the site's edges, not directly along a street or facade.
     // The four diagonal alternatives let us favour an unobstructed site.
     const edge=allPoints(selectedGeometry(currentResult)).slice(0,2).map(p=>project(p));
-    const azimuth=edge.length===2?Math.atan2(edge[1].x-edge[0].x,edge[1].z-edge[0].z)+Math.PI/4:-.64;
-    for(let i=0;i<4;i++) {
-      const angle=azimuth+i*Math.PI/2,direction=new THREE.Vector3(Math.sin(angle),.74,Math.cos(angle)).normalize();
+    const outline=allPoints(selectedGeometry(currentResult)).map(p=>project(p)),longEdge=outline.slice(1).map((p,i)=>p.clone().sub(outline[i])).sort((a,b)=>b.length()-a.length())[0];
+    const narrow=width<600;
+    const azimuth=narrow&&longEdge?Math.atan2(longEdge.x,longEdge.z):edge.length===2?Math.atan2(edge[1].x-edge[0].x,edge[1].z-edge[0].z)+Math.PI/4:-.64;
+    for(let i=0;i<(narrow?2:4);i++) {
+      const angle=azimuth+i*Math.PI/(narrow?1:2),direction=new THREE.Vector3(Math.sin(angle),.74,Math.cos(angle)).normalize();
       let obstructed=0;
       for(const point of points) {
         const start=point.clone().addScaledVector(direction,800);
@@ -480,26 +484,34 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
     const meshes=[];
     for(const b of concept.buildings){
       if(!Number.isFinite(b.height)||b.height<=0)continue;
-      const mesh=meshFor(b.geometry,b.height,proposalMaterial,.18);if(!mesh)continue;
+      const pitched=b.typology!=='apartment',rise=pitched?Math.min(1.15,b.height*.21):.12,wallHeight=b.height-rise;
+      const center=average(allPoints(b.geometry)),ring=polygonCoordinates(b.geometry)[0][0],local=ring.map(p=>project(p));
+      const minSide=Math.min(local[0].distanceTo(local[1]),local[1].distanceTo(local[2])),factor=1-.16/minSide;
+      const inset=polygonCoordinates(b.geometry).map(p=>p.map(r=>r.map(([x,y])=>[center[0]+(x-center[0])*factor,center[1]+(y-center[1])*factor])));
+      const mesh=meshFor(inset,wallHeight,proposalMaterial,0);if(!mesh)continue;
       mesh.userData.feature={...b,kind:'proposed-home'};proposalGroup.add(mesh);pickable.push(mesh);meshes.push(b);
-      const cap=meshFor(b.geometry,.12,roofMaterial,b.height+.06);if(cap)proposalGroup.add(cap);
-      architecturalFacades(b,concept.buildings);
-      const roof=outline(b.geometry,new THREE.LineBasicMaterial({color:'#77836f',transparent:true,opacity:.4}),b.height+.2);
-      roof.traverse(n=>{if(n.material){materials.add(n.material);n.userData.ownMaterial=true;}});proposalGroup.add(roof);
-      const storeys=Number.isInteger(b.storeys)?b.storeys:concept.parameters?.storeys;
-      if(Number.isInteger(storeys)&&storeys>1&&storeys<=40)for(let floor=1;floor<storeys;floor++){
-        const band=outline(b.geometry,new THREE.LineBasicMaterial({color:'#f8f5ed',transparent:true,opacity:.65}),.18+b.height*floor/storeys);
-        band.traverse(n=>{if(n.material){materials.add(n.material);n.userData.ownMaterial=true;}});proposalGroup.add(band);
-      }
+      if(pitched){
+        const corners=local.slice(0,4),front=corners[0].clone().lerp(corners[1],.5),back=corners[3].clone().lerp(corners[2],.5);
+        const v=[...corners.map(p=>[p.x,wallHeight,p.z]),[front.x,b.height,front.z],[back.x,b.height,back.z]];
+        const indices=[0,4,5,0,5,3,4,1,2,4,2,5,0,1,4,3,5,2],g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(indices.flatMap(i=>v[i]),3));g.computeVertexNormals();
+        const mat=roofMaterial.clone();mat.side=THREE.DoubleSide;materials.add(mat);const roof=new THREE.Mesh(g,mat);roof.userData.ownMaterial=true;roof.castShadow=true;roof.receiveShadow=true;proposalGroup.add(roof);
+        const ridgeMaterial=new THREE.LineBasicMaterial({color:'#468aaf',transparent:true,opacity:.55});materials.add(ridgeMaterial);const ridge=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(front.x,b.height+.001,front.z),new THREE.Vector3(back.x,b.height+.001,back.z)]),ridgeMaterial);ridge.userData.ownMaterial=true;proposalGroup.add(ridge);
+      }else{const cap=meshFor(b.geometry,.12,roofMaterial,b.height-.12);if(cap)proposalGroup.add(cap);}
+      architecturalFacades({...b,wallHeight},concept.buildings);
       anchors.set(b.id,centerOf(b.geometry).setY(b.height+.7));
     }
     if(meshes[0]){const home=centerOf(meshes[0].geometry).setY(meshes[0].height+.7);anchors.set('homes',home);anchors.set('height',home.clone());}
     for(const parking of concept.parking??[]){
-      const material=makeMaterial({color:'#d7ddcf',transparent:true,opacity:.86});
+      const material=makeMaterial({color:'#aeb9b3',roughness:1});
       const mesh=meshFor(parking.geometry,0,material,.19);if(!mesh){material.dispose();materials.delete(material);continue;}
       mesh.userData={feature:{...parking,kind:'proposed-parking'},ownMaterial:true};proposalGroup.add(mesh);pickable.push(mesh);
-      proposalGroup.add(outline(parking.geometry,parcelOutlineMaterial,.21));
+      const stripe=new THREE.LineBasicMaterial({color:'#ffffff'});materials.add(stripe);const lines=outline(parking.geometry,stripe,.21);lines.traverse(n=>{if(n.material)n.userData.ownMaterial=true;});proposalGroup.add(lines);
+      // A neutral car-sized block gives scale without changing the parking bay.
+      const ring=polygonCoordinates(parking.geometry)[0][0],a=project(ring[0]),b=project(ring[1]),c=centerOf(parking.geometry);
+      const car=new THREE.Mesh(new THREE.BoxGeometry(1.75,.65,3.9),sillMaterial);car.rotation.y=-Math.atan2(b.z-a.z,b.x-a.x);car.position.copy(c).setY(.65);car.castShadow=true;car.receiveShadow=true;proposalGroup.add(car);
+      const cabin=new THREE.Mesh(new THREE.BoxGeometry(1.5,.48,2.1),glazingMaterial);cabin.rotation.copy(car.rotation);cabin.position.copy(c).setY(1.18);cabin.castShadow=true;proposalGroup.add(cabin);
     }
+    for(const geometry of concept.maneuver??[]){const mat=makeMaterial({color:'#dce2dc',roughness:1});const mesh=meshFor(geometry,0,mat,.175);if(mesh){mesh.userData.ownMaterial=true;proposalGroup.add(mesh);}}
     if(concept.parking?.[0])anchors.set('parking',centerOf(concept.parking[0].geometry).setY(.3));
   }
 
@@ -507,21 +519,31 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
   // footprint, floor area, capacity or access evidence, and avoids party walls.
   function architecturalFacades(building,buildings){
     const ring=polygonCoordinates(building.geometry)[0]?.[0]??[],center=centerOf(building.geometry),storeys=building.storeys;
-    const floorHeight=building.height/storeys;
+    const floorHeight=building.wallHeight/storeys;
+    const toward=currentScenario.concept.siteDesign?.frontage?.nearestPoint?project(currentScenario.concept.siteDesign.frontage.nearestPoint):centerOf(currentScenario.concept.site);
+    const faces=[];
     for(let edge=1;edge<ring.length;edge++){
       const a=project(ring[edge-1]),b=project(ring[edge]),dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);if(length<2)continue;
       let nx=-dz/length,nz=dx/length;const mx=(a.x+b.x)/2,mz=(a.z+b.z)/2;
       if(nx*(mx-center.x)+nz*(mz-center.z)<0){nx=-nx;nz=-nz;}
       const outside=[origin[0]+(mx+nx*.1)/xScale,origin[1]-(mz+nz*.1)/EARTH_METRES];
       if(buildings.some(other=>other.id!==building.id&&pointInGeometry(outside,other.geometry)))continue;
-      const bays=Math.max(1,Math.floor(length/2.8)),bayWidth=length/bays,windowWidth=Math.min(1.55,bayWidth*.52),windowHeight=Math.min(1.75,floorHeight*.53);
+      faces.push({a,b,dx,dz,length,nx,nz,score:nx*(toward.x-center.x)+nz*(toward.z-center.z)});
+    }
+    const entrance=faces.slice().sort((a,b)=>b.score-a.score)[0];
+    for(const face of faces){
+      const {a,dx,dz,length,nx,nz}=face,angle=Math.atan2(nx,nz);
+      const box=(w,h,d,t,y,mat,offset=-.035)=>{const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);mesh.position.set(a.x+dx*t+nx*offset,y,a.z+dz*t+nz*offset);mesh.rotation.y=angle;mesh.castShadow=true;mesh.receiveShadow=true;proposalGroup.add(mesh);return mesh;};
+      const bays=Math.max(2,Math.floor(length/2.5)),bayWidth=length/bays,ww=Math.min(1.35,bayWidth*.57),wh=Math.min(1.4,floorHeight*.53);
       for(let floor=0;floor<storeys;floor++)for(let bay=0;bay<bays;bay++){
-        const t=(bay+.5)/bays,y=.18+floorHeight*(floor+.53);
-        const pane=new THREE.Mesh(new THREE.PlaneGeometry(windowWidth,windowHeight),glazingMaterial);
-        pane.position.set(a.x+dx*t+nx*.022,y,a.z+dz*t+nz*.022);pane.rotation.y=Math.atan2(nx,nz);proposalGroup.add(pane);
-        const sill=new THREE.Mesh(new THREE.BoxGeometry(windowWidth+.12,.10,.13),sillMaterial);
-        sill.position.copy(pane.position);sill.position.y-=windowHeight/2+.035;sill.rotation.y=pane.rotation.y;sill.castShadow=true;sill.receiveShadow=true;proposalGroup.add(sill);
+        const t=(bay+.5)/bays,door=face===entrance&&floor===0&&bay===Math.floor(bays/2),h=door?Math.min(2.1,floorHeight-.12):wh,w=door?.94:ww,y=door?h/2:floorHeight*(floor+.54);
+        box(w+.16,h+.16,.065,t,y,sillMaterial,-.043);
+        box(w,h,.035,t,y,glazingMaterial,-.025);
+        // Restrained vertical mullion and inset entry surround.
+        if(!door)box(.045,h,.045,t,y,sillMaterial,-.03);
+        else{box(.09,h+.12,.065,t-(w/2+.08)/length,y,sillMaterial);box(.09,h+.12,.065,t+(w/2+.08)/length,y,sillMaterial);}
       }
+      if(building.typology==='apartment')for(let floor=1;floor<storeys;floor++)box(length-.18,.12,.065,.5,floor*floorHeight,sillMaterial,-.04);
     }
   }
 
@@ -549,7 +571,7 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
     const selectedCandidate=candidateObjects.get(String(target));
     for(const mesh of new Set(candidateObjects.values()))mesh.material.opacity=mesh===selectedCandidate ? .72 : .42;
     for(const[id,marker]of placeObjects)marker.visible=id===target||id===focusMode;
-    proposalMaterial.color.set(target==='homes'||target==='height'?'#d9e3cd':'#e8e3d7');
+    proposalMaterial.color.set(target==='homes'||target==='height'?'#d8ebd7':'#f1f0e9');
     selectionMaterial.opacity=target==='land'||target==='selection'?.8:.56;
     requestRender();
   }
@@ -564,6 +586,7 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
     origin=nextOrigin;xScale=Math.max(.001,EARTH_METRES*Math.cos(origin[1]*Math.PI/180));
     if(moved){cameraTouched=false;hadContext=false;}
     for(const group of [contextGroup,landGroup,proposalGroup,roadGroup,placesGroup])disposeChildren(group);
+    proposalMaterial.opacity=1;proposalMaterial.transparent=false;
     anchors.clear();pickable.length=0;contextObjects.clear();placeObjects.clear();candidateObjects.clear();proposalGroup.scale.y=1;
     buildLand();buildContext();buildProposal();applyContextVisibility(focusMode);
 
@@ -572,7 +595,7 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
     const newProposal=key!==lastScenarioKey;
     const renderVersion=contextOf(currentResult).renderVersion??contextOf(currentResult).version??'';
     const contextChanged=renderVersion!==lastRenderVersion;lastRenderVersion=renderVersion;
-    if(key&&key!==lastScenarioKey&&proposalGroup.children.length&&!reducedMotion()){revealStart=performance.now();proposalGroup.scale.y=.015;}else revealStart=0;
+    if(key&&key!==lastScenarioKey&&proposalGroup.children.length&&!reducedMotion()){revealStart=performance.now();proposalGroup.traverse(n=>{if(n.isMesh&&n.material===proposalMaterial){n.material.transparent=true;n.userData.revealMaterial=true;}});}else revealStart=0;
     lastScenarioKey=key;
     if(!renderer){renderFallback();return;}
     const hasContext=Boolean(contextOf(currentResult).buildings?.length);

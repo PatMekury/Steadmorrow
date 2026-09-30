@@ -1,3 +1,4 @@
+import {normalizeHousingOptions} from './findings-session.js';
 import {hasPrivateInput,privacyMessage} from './input-privacy.js';
 import {createSiteScene,canDrawHousing} from './site-scene.js';
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
@@ -136,26 +137,28 @@ function saveBrief(result,scenario,svg,studyError){
   const blob=new Blob(['<!doctype html>\n'+doc.documentElement.outerHTML],{type:'text/html;charset=utf-8'}),url=URL.createObjectURL(blob),a=el('a');a.href=url;a.download='Steadmorrow-discussion-brief.html';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 export function createSpatialExperience({result,scenario,simulationState={},userPriorities={},onSimulate,onOption,plan}){
+  scenario=normalizeHousingOptions(scenario);
   const root=el('div',undefined,'site-workspace');
   const left=el('aside',undefined,'priority-dashboard'),stage=el('section',undefined,'site-exploration'),inspector=el('aside',undefined,'site-inspector');
   left.setAttribute('aria-label','Your priorities');stage.setAttribute('aria-label','Your land in three dimensions');inspector.setAttribute('aria-label','What the findings mean');root.append(left,stage,inspector);
   const concept=scenario?.concept,presentation=scenePresentation(result,concept,scenario),context=sceneContext(result,scenario);
   const top=el('header',undefined,'scene-heading');top.append(el('h3','Your land, in context'));
   const mode=el('div',undefined,'scene-view-switch');mode.setAttribute('role','group');mode.setAttribute('aria-label','Scene view');top.append(mode);stage.append(top);
-  const options=scenario?.options??[];let optionDetail;
+  const options=scenario?.options??[];let optionDetail,optionControls;
   if(options.length){
     const tabs=el('div',undefined,'housing-options');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Housing options');
     const activeId=scenario.activeOptionId??options[0].id;
     for(const [i,option] of options.entries()){
       const tab=button('',()=>onOption?.(option.id),'housing-option');tab.id='housing-tab-'+option.id;tab.setAttribute('role','tab');tab.setAttribute('aria-controls','housing-option-panel');tab.setAttribute('aria-selected',String(option.id===activeId));tab.tabIndex=option.id===activeId?0:-1;
-      tab.append(el('span',String(i+1).padStart(2,'0'),'option-number'),el('span',option.title),el('small',option.useStatus==='unresolved'?'Use unresolved':option.concept?.buildings?.length?'Illustrative arrangement':'Placement unresolved'));
+      tab.append(optionIcon(option.typology),el('span',option.title,'option-title'),el('small',`${option.concept.metrics.homes} homes · ${option.concept.metrics.storeys} ${option.concept.metrics.storeys===1?'storey':'storeys'} · ${option.concept.metrics.parking} parking`),el('span',option.id===activeId?'Viewing':'View arrangement →','option-action'));
       tab.addEventListener('keydown',event=>{const keys=['ArrowLeft','ArrowRight','Home','End'];if(!keys.includes(event.key))return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?options.length-1:(i+(event.key==='ArrowLeft'?-1:1)+options.length)%options.length;onOption?.(options[next].id);});tabs.append(tab);
     }
-    stage.append(tabs);
+    requestAnimationFrame(()=>{if(!tabs.isConnected||tabs.scrollWidth<=tabs.clientWidth)return;const active=tabs.querySelector('[aria-selected=true]');if(active)tabs.scrollTo({left:tabs.scrollLeft+active.getBoundingClientRect().left-tabs.getBoundingClientRect().left-(tabs.clientWidth-active.offsetWidth)/2,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});});
+    optionControls=el('div',undefined,'option-dock');optionControls.append(el('p',options.length===1?'One reviewed arrangement':'Explore the arrangements','option-dock-title'),tabs);if(options.length===1)optionControls.append(el('p','Only this arrangement currently has a placed, reviewed result. Other possibilities remain open.','option-dock-note'));
     const option=options.find(o=>o.id===activeId),detail=el('details',undefined,'housing-option-detail');detail.append(el('summary','Why this option · housing-use conditions'));optionDetail=detail;
     detail.append(el('p',option?.dimensionBasis),el('p',option?.applicability,'option-qualification'));sourceLinks(detail,option?.support,scenario?.sources??result.sources);
   }
-  const surface=el('div',undefined,'site-surface');if(options.length){surface.id='housing-option-panel';surface.setAttribute('role','tabpanel');surface.setAttribute('aria-labelledby','housing-tab-'+(scenario.activeOptionId??options[0].id));}stage.append(surface);
+  const surface=el('div',undefined,'site-surface');if(options.length){surface.id='housing-option-panel';surface.setAttribute('role','tabpanel');surface.setAttribute('aria-labelledby','housing-tab-'+(scenario.activeOptionId??options[0].id));}stage.append(surface);if(optionControls)stage.append(optionControls);
   const canvasKey=JSON.stringify(result.selectedArea?.geometry??[]);
   if(!retainedScene||retainedScene.key!==canvasKey){retainedScene?.view?.dispose();retainedScene={key:canvasKey,host:el('div',undefined,'site-canvas'),view:null,mode:'3d',onViewChange:null,onSelectFeature:null};}
   const retained=retainedScene;surface.append(retained.host);
@@ -219,8 +222,12 @@ export function createSpatialExperience({result,scenario,simulationState={},user
   const three=button('3D',()=>{retained.mode='3d';retained.view?.setView('3d');three.setAttribute('aria-pressed','true');two.setAttribute('aria-pressed','false');}),two=button('Plan',()=>{retained.mode='plan';retained.view?.setView('plan');two.setAttribute('aria-pressed','true');three.setAttribute('aria-pressed','false');});three.setAttribute('aria-pressed',String(retained.mode==='3d'));two.setAttribute('aria-pressed',String(retained.mode==='plan'));mode.append(three,two);
   const controls=el('div',undefined,'site-camera-controls');controls.append(button('↺',()=>retained.view?.rotate(),'camera-control'),button('Focus land',()=>retained.view?.focus('selection'),'camera-control'),button('Neighbourhood',()=>retained.view?.focus('context'),'camera-control'));controls.firstChild.setAttribute('aria-label','Rotate the site');surface.append(controls);
   const caption=el('div',undefined,'site-scene-caption');caption.append(el('span','Selected land','key-selection'),el('span','Mapped property','key-parcel'),el('span','Existing buildings','key-existing'));stage.append(caption);
-  const heightNote=el('details',undefined,'scene-height-note');heightNote.append(el('summary','About the map and building heights'),el('p',heightExplanation),el('p','Proposed façades and roof details are illustrative architectural treatment, not surveyed elevations or an interior design.'),el('p','Streets follow mapped paths. Widths use mapped measurements where available, otherwise approximate widths based on lanes or road type. They are not surveyed road boundaries.'));stage.append(heightNote);
+  const heightNote=el('details',undefined,'scene-height-note');heightNote.append(el('summary','About the map and building heights'),el('p',heightExplanation),el('p','Proposed façades, entrances and roofs are illustrative. Roofs stay within the measured footprint and total assumed height; they are not surveyed elevations, resolved floor-to-ceiling heights or an interior design.'),el('p','Streets follow mapped paths. Widths use mapped measurements where available, otherwise approximate widths based on lanes or road type. They are not surveyed road boundaries.'));stage.append(heightNote);
   if(optionDetail)stage.append(optionDetail);
+  if(scenario?.explorations?.length){const explored=el('details',undefined,'housing-option-detail explored-options');explored.append(el('summary',`Other exploration · ${scenario.explorations.length} unresolved`));for(const o of scenario.explorations){explored.append(el('h4',o.title),el('p',o.concept?sceneOutcome(result,{concept:o.concept}):o.applicability));}stage.append(explored);}
+  if(presentation.placed){const measures=el('div',undefined,'scene-measures');for(const [value,label] of [[`${number(concept.parameters.width)} × ${number(concept.parameters.depth)} m`,concept.typology==='apartment'?'Building footprint':'Home footprint'],[`${number(concept.metrics.heightMeters)} m`,'Assumed height'],['2.6 × 5 m','Parking bay']]){const item=el('span');item.append(el('strong',value),el('small',label));measures.append(item);}stage.insertBefore(measures,optionControls??caption);
+    const design=el('details',undefined,'housing-option-detail');design.append(el('summary','Parking, entrances & open space'),el('p',concept.siteDesign?.reason??'This saved arrangement uses available space for parking; its relationship to street frontage has not been resolved.'),el('p','Each bay is 2.6 × 5 m; the lightly shaded maneuvering strip is 6 m deep. Door positions are illustrative. A driveway, continuous accessible walking route, fire access and landscape plan still need site review.'));stage.append(design);}
+
   const outcome=el('p',sceneOutcome(result,scenario),'site-outcome');outcome.setAttribute('role','status');stage.insertBefore(outcome,caption);
   if(simulationState.error){const error=el('p',simulationState.error,'scene-error');error.setAttribute('role','alert');stage.append(error,button('Try the study again',()=>onSimulate?.(''),'site-text-button'));}
   appendContextAttribution(stage,context,'scene-attribution');
@@ -234,7 +241,7 @@ export function createSpatialExperience({result,scenario,simulationState={},user
 
   if(result.parcel?.members?.length>1&&positions.length<3&&!askedTargets.has('land'))addCallout('Separate property rights','property',`Your selection includes ${result.parcel.members.length} mapped parcels. This study retains each boundary. Common ownership and any consolidation needed for development remain unverified.`,'constraint');
 
-  left.append(el('h3','What matters to you'));
+  left.append(el('h3','What matters to you'),el('p','Open a priority to explore it on the map.','priority-guidance'));
   const brief=simulationState.brief??scenario?.brief;
   const original=[userPriorities.purpose,userPriorities.matters,...(userPriorities.choices??[])].filter(Boolean);
   const priorityInputs=brief?.length?brief:original.map((text,i)=>({id:'pending-'+i,label:text,originalExcerpt:text,pending:result.narrativeStatus==='researching',unresolved:result.narrativeStatus!=='researching'}));
@@ -247,17 +254,17 @@ export function createSpatialExperience({result,scenario,simulationState={},user
     const value=priorityValue(item,{result,scenario,simulationState});
     const sourceLabel=item.label||item.originalExcerpt||'Your priority';
     const label=sourceLabel.charAt(0).toUpperCase()+sourceLabel.slice(1);
-    const showPriority=trigger=>{if(measurement?.feature?.id)retained.view?.focus(measurement.feature.id);reveal(trigger,measurement?.feature?.id||item.target||'selection',distance!==null?`${(measurement.mode??'walking').replace(/^./,c=>c.toUpperCase())} route`:label,distance!==null?(measurement.feature?.name??'Mapped destination'):(answer?.detail||answer?.headline||answer?.explanation||item.meaning||'This is part of the request being explored.'),d=>{
+    const showPriority=trigger=>{if(measurement?.feature?.id)retained.view?.focus(measurement.feature.id);else retained.view?.focus('selection');reveal(trigger,measurement?.feature?.id||item.target||'selection',distance!==null?`${(measurement.mode??'walking').replace(/^./,c=>c.toUpperCase())} route`:label,distance!==null?(measurement.feature?.name??'Mapped destination'):(answer?.detail||answer?.headline||answer?.explanation||item.meaning||'This is part of the request being explored.'),d=>{
       if(distance!==null){d.append(el('strong',`${value} · ${measurement.mode??'walking'}`,'priority-distance'));if(Number.isFinite(measurement.durationSeconds))d.append(el('p',`About ${Math.max(1,Math.round(measurement.durationSeconds/60))} min · estimated travel time`));}
       let detailHost=d;if(measurement?.detail){if(distance!==null){const check=el('details',undefined,'priority-original');check.open=answer?.status==='partial';check.append(el('summary','How this route was checked'),el('p',measurement.detail));d.append(check);detailHost=check;}else if(measurement.detail!==(answer?.detail||answer?.headline||answer?.explanation))d.append(el('p',measurement.detail));}
       if(measurement?.route?.attribution){const a=el('a',measurement.route.attribution+' ↗');a.href='https://valhalla.openstreetmap.de/';a.target='_blank';a.rel='noopener noreferrer';detailHost.append(a);}
       if(item.originalExcerpt){const asked=el('details',undefined,'priority-original');asked.append(el('summary','Your question'),el('blockquote','“'+item.originalExcerpt+'”'));detailHost.append(asked);}
       const url=answer?.feature?.sourceUrl??answer?.sourceUrl??measurement?.feature?.sourceUrl??measurement?.sourceUrl;if(url){const a=el('a','View the source ↗');a.href=url;a.target='_blank';a.rel='noopener noreferrer';detailHost.append(a);}
     });};
-    const b=button('',()=>showPriority(b),'priority-tile');b.setAttribute('aria-expanded','false');b.dataset.answerState=answer?.status==='partial'?'partial':distance!==null||answer?.status==='answered'?'answered':'pending';b.append(el('span',label,'priority-title'),el('strong',value,'priority-answer'),el('span','+','priority-open'));left.append(b);
+    const b=button('',()=>showPriority(b),'priority-tile');b.setAttribute('aria-expanded','false');b.dataset.answerState=answer?.status==='partial'?'partial':distance!==null||answer?.status==='answered'?'answered':'pending';b.append(el('span',label,'priority-title'),el('strong',value,'priority-answer'),el('span','+','priority-open'),el('small','Explore on map','priority-hint'));left.append(b);
 
   }
-  if(!options.length&&result.version?.assessment&&result.parcel&&!simulationState.busy&&result.narrativeStatus!=='researching')stage.append(button('Compare three housing options',()=>onSimulate?.(''),'site-text-button'));
+  if(!options.length&&result.version?.assessment&&result.parcel&&!simulationState.busy&&result.narrativeStatus!=='researching')stage.append(button('Explore housing arrangements',()=>onSimulate?.(''),'site-text-button'));
   const canRefine=Boolean(result.version?.assessment&&result.parcel&&result.status!=='needs-parcel'&&!result.locality?.boundaryUncertain&&!result.locality?.authorityUnresolved&&!simulationState.busy);
   const add=button('Add a concern +',()=>{form.hidden=!form.hidden;if(!form.hidden)input.focus();},'add-concern');add.disabled=!canRefine;left.append(add);
   const form=el('form',undefined,'priority-refine');form.hidden=!simulationState.question;
@@ -296,4 +303,10 @@ export function createSpatialExperience({result,scenario,simulationState={},user
     requestAnimationFrame(updateAnchors);
   };
   return {root,inspector,finish,openReading};
+}
+
+function optionIcon(form){
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 64 48');svg.setAttribute('class','option-icon');svg.setAttribute('aria-hidden','true');
+  const paths=form==='apartment'?['M12 42V10L38 4L53 12V42Z','M38 4V42','M18 16H23M29 14H34M18 24H23M29 22H34M18 32H23M29 30H34M44 17H49M44 25H49M44 33H49']:form==='attached'?['M5 22L15 12L25 22V42H5Z M25 22L35 12L45 22V42H25Z M45 22L53 14L61 22V42H45Z','M12 42V30H18V42M32 42V30H38V42M51 42V30H56V42']:['M9 23L29 7L51 23V42H9Z','M9 23H51M27 42V28H35V42M15 28H21V34H15Z','M29 7L40 5L59 20L51 23M51 42L59 37V20'];
+  for(const d of paths){const p=document.createElementNS(svg.namespaceURI,'path');p.setAttribute('d',d);p.setAttribute('fill','none');p.setAttribute('stroke','currentColor');p.setAttribute('stroke-width','1.7');p.setAttribute('stroke-linejoin','round');svg.append(p);}return svg;
 }

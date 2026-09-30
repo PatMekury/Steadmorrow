@@ -14,10 +14,11 @@ export async function mergeStudyEvidence(input,result,scenario){
   if(!scenario||scenario.assessmentVersion!==result?.version?.assessment||scenario.version?.assessment!==result.version.assessment)return result;
   const expected=scenario.version?.evidence;
   if(!assessmentVersion(expected)||!Array.isArray(scenario.sources)||!safeInput(input))return result;
+  if([scenario.concept,...[...(scenario.options??[]),...(scenario.explorations??[]),...(scenario.testHistory??[])].map(o=>o.concept)].some(c=>c?.roadContextVersion&&c.roadContextVersion!==result.siteContext?.renderVersion))return result;
   const geometry=scenario.concept?.contextVersion??scenario.contextVersion??null;
   if(geometry!==(result.siteContext?.geometryVersion??null)||(scenario.siteContext?.geometryVersion??null)!==geometry)return result;
   if(scenario.concept&&scenario.concept.evidenceVersion!==expected)return result;
-  if((scenario.options??[]).some(o=>o.concept&&(o.concept.evidenceVersion!==expected||(o.concept.contextVersion??null)!==geometry)))return result;
+  if([...(scenario.options??[]),...(scenario.explorations??[]),...(scenario.testHistory??[])].some(o=>o.concept&&(o.concept.evidenceVersion!==expected||(o.concept.contextVersion??null)!==geometry)))return result;
   const sources=scenario.sources;
   if(new Set(sources.map(s=>s.id)).size!==sources.length||sources.some(s=>!s.id||!s.url||!s.hash))return result;
   if((result.sources??[]).some(s=>!sources.some(n=>n.id===s.id&&n.url===s.url&&n.hash===s.hash)))return result;
@@ -31,14 +32,15 @@ export async function mergeStudyEvidence(input,result,scenario){
 export function matchingSavedScenario(result,scenario){
   const version=result?.version?.assessment;
   if(!assessmentVersion(version)||scenario?.assessmentVersion!==version)return null;
-  if((scenario.options??[]).some(o=>o.concept&&(o.concept.evidenceVersion!==(result.caseId??result.version?.evidence)||(o.concept.contextVersion??null)!==(result.siteContext?.geometryVersion??null))))return null;
+  if([...(scenario.options??[]),...(scenario.explorations??[]),...(scenario.testHistory??[])].some(o=>o.concept&&(o.concept.evidenceVersion!==(result.caseId??result.version?.evidence)||(o.concept.contextVersion??null)!==(result.siteContext?.geometryVersion??null))))return null;
   if(scenario.options?.length&&(!scenario.options.some(o=>o.id===scenario.activeOptionId)&&scenario.activeOptionId))return null;
   if(scenario.status==='needs-evidence'&&!scenario.concept)return scenario.version?.assessment===version&&scenario.version?.evidence===(result.caseId??result.version?.evidence)&&(scenario.contextVersion??null)===(result.siteContext?.geometryVersion??null)?scenario:null;
+  if([scenario.concept,...[...(scenario.options??[]),...(scenario.explorations??[]),...(scenario.testHistory??[])].map(o=>o.concept)].some(c=>c?.roadContextVersion&&c.roadContextVersion!==result.siteContext?.renderVersion))return null;
   if(!scenario.concept)return null;
   if(scenario.concept.status==='no-fit'&&scenario.concept.method&&!scenario.concept.method.includes('translated-v4'))return null;
   if(scenario.version?.assessment!==version||scenario.concept.evidenceVersion!==(result.caseId??result.version?.evidence))return null;
   if((scenario.concept.contextVersion??null)!==(result.siteContext?.geometryVersion??null))return null;
-  return scenario;
+  return normalizeHousingOptions(scenario);
 }
 
 export function saveFindingsSession(storage,{input,lastFindings,scenario=null,simulationState={}},now=Date.now()){
@@ -90,7 +92,18 @@ export function savedFindingsMessage(saved){
 }
 
 export function activateHousingOption(scenario,id){
-  const option=scenario?.options?.find(o=>o.id===id);if(!option)return scenario;
+  const option=selectableHousingOptions(scenario).find(o=>o.id===id);if(!option)return scenario;
   return {...scenario,activeOptionId:id,concept:option.concept??null,status:option.concept?.status??'needs-evidence',
     rationale:option.dimensionBasis,support:option.support,contextVersion:scenario.siteContext?.geometryVersion??null};
+}
+
+export function selectableHousingOptions(scenario){
+  return (scenario?.options??[]).filter(o=>o.useStatus==='conditional'&&o.reviewed!==false&&o.concept?.status==='illustrative'&&o.concept?.buildings?.length);
+}
+export function normalizeHousingOptions(scenario){
+  if(!scenario?.options?.length)return scenario;
+  const options=selectableHousingOptions(scenario),explorations=[...(scenario.explorations??[]),...scenario.options.filter(o=>!options.includes(o))];
+  const next={...scenario,options,explorations};
+  if(options.length&&!options.some(o=>o.id===scenario.activeOptionId))return activateHousingOption(next,options[0].id);
+  return next;
 }

@@ -33,7 +33,7 @@ test('three options require source review and three distinct reviewed arrangemen
  const result=await run({assessmentVersion:'a'.repeat(20)});
  assert.equal(result.options.length,3);assert.equal(result.activeOptionId,'option-1');assert.equal(result.research.optionAuditCalls,2);assert.equal(result.research.modelCalls,13);
  assert.ok(result.options.every(o=>o.concept?.buildings.length&&o.concept.optionId===o.id));assert.equal(new Set(result.options.map(o=>o.concept.id)).size,3);
- assert.ok(errors.some(e=>e.includes('Independent option review')));assert.ok(errors.some(e=>e.includes('Each of the three')));
+ assert.ok(errors.some(e=>e.includes('Independent option review')));assert.ok(errors.some(e=>e.includes('Each planned option')));
  const switched=activateHousingOption(result,'option-3');assert.equal(switched.concept.parameters.width,8);assert.equal(switched.version.scenario,result.version.scenario);assert.equal(result.concept.parameters.width,6);
  const finding={caseId:evidence.caseId,version:{assessment:'a'.repeat(20)},siteContext:evidence.siteContext};assert.ok(matchingSavedScenario(finding,switched));
  const stale=structuredClone(switched);stale.options[0].concept.evidenceVersion='d'.repeat(20);assert.equal(matchingSavedScenario(finding,stale),null,'an inactive stale option invalidates the saved collection');
@@ -53,4 +53,48 @@ test('retained narrow Houston outline places the previously rejected footprint w
  const c=calculateConcept(e,e.parameters);assert.equal(c.metrics.homes,3);assert.equal(c.metrics.parking,2);assert.equal(c.parameters.width,8);assert.equal(c.parameters.depth,10);assert.equal(c.parameters.spacing,3);assert.equal(c.parameters.edge_clearance,2);
  for(const b of c.buildings){assert.ok(Math.abs(overlapArea(b.geometry,e.selectedArea.geometry)-multiArea(b.geometry))<.001);assert.ok(Math.abs(overlapArea(b.geometry,e.parcel.geometry)-multiArea(b.geometry))<.001);}
  assert.equal(c.diagnostics.search.exhaustive,false);assert.ok(c.diagnostics.search.orientations>1);assert.equal(c.checks.legalCapacity,'not-established');
+});
+
+
+for(const count of [1,2])test(`${count} useful alternatives can finish without padding to three`,async()=>{
+ const entry={input:{priorities:{purpose:'Affordable housing',matters:'',choices:[]}},result:{housingRoute:'supported'},session:{snapshot:()=>structuredClone(evidence),context:()=>structuredClone(evidence),toolDefinitions:()=>[],renewSignal(){}}};
+ let round=0,ids=[];const chosen=options.slice(0,count),steps=[['interpret_priorities',{items:[{label:'Housing',meaning:'Explore housing',original_excerpt:'Affordable housing',kind:'goal',target:'homes'}]}],['plan_housing_options',{options:chosen}]];
+ chosen.forEach((o,i)=>steps.push(['test_layout',{...base,width:6+i,option_id:o.id}],['review_layout',()=>({concept_id:ids[i]})]));steps.push(['select_layout',()=>({concept_id:ids[0],rationale:'Compact housing preserves outdoor space.',support:[]})]);
+ const run=createScenarioAgent({apiKey:'fixture',model:'fixture',resolveContext:()=>entry,reserve:()=>()=>{},optionAuditor:async()=>({accepted:true,issues:[]}),fetchImpl:async(_,request)=>{
+ const body=JSON.parse(request.body);for(const o of body.input.filter(i=>i.type==='function_call_output').map(i=>JSON.parse(i.output)))if(o.id&&o.metrics&&!ids.includes(o.id))ids.push(o.id);
+ const [name,args]=steps[round++];return new Response(JSON.stringify({output:[{type:'function_call',call_id:'c'+round,name,arguments:JSON.stringify(typeof args==='function'?args():args)}]}));}});
+ const r=await run({assessmentVersion:'a'.repeat(20)});assert.equal(r.options.length,count);assert.ok(r.options.every(o=>o.reviewed&&o.concept.buildings.length));assert.equal(r.explorations.length,0);
+});
+
+test('saved empty options move to supporting exploration without losing stale-evidence checks',async()=>{
+ const {normalizeHousingOptions}=await import('../findings-session.js');
+ const placed=calculateConcept(evidence,base),failed={...placed,id:'f'.repeat(20),status:'no-fit',buildings:[]};
+ const s={assessmentVersion:'a'.repeat(20),version:{assessment:'a'.repeat(20)},concept:failed,activeOptionId:'option-1',options:[{id:'option-1',useStatus:'conditional',concept:failed},{id:'option-2',useStatus:'conditional',concept:placed}]};
+ const next=normalizeHousingOptions(s);assert.equal(next.options.length,1);assert.equal(next.explorations.length,1);assert.equal(next.concept.id,placed.id);assert.equal(s.options.length,2);assert.equal(activateHousingOption(next,'option-1'),next);
+ const finding={caseId:evidence.caseId,version:{assessment:'a'.repeat(20)},siteContext:evidence.siteContext};assert.ok(matchingSavedScenario(finding,next));
+ const stale=structuredClone(next);stale.explorations[0].concept.evidenceVersion='d'.repeat(20);assert.equal(matchingSavedScenario(finding,stale),null);
+ const roadStale=structuredClone(next);roadStale.options[0].concept.roadContextVersion='earlier-roads';assert.equal(matchingSavedScenario(finding,roadStale),null);
+});
+
+test('street-facing parking retains metre dimensions, one continuous aisle and no building collision',()=>{
+ const roads=[{id:'road',kind:'residential',name:'Fixture street',geometry:[geo([0,-8]),geo([80,-8])],sourceUrl:'https://example.org/road'}];
+ const e={...evidence,siteContext:{...evidence.siteContext,renderVersion:'roads-v1',roads}};
+ const c=calculateConcept(e,{...base,parking_spaces:3,parking_strategy:'street-edge'});
+ assert.equal(c.parking.length,3);assert.equal(c.maneuver.length,1);assert.equal(c.roadContextVersion,'roads-v1');
+ assert.equal(c.siteDesign.frontage.roadId,'road');assert.equal(c.checks.access,'not-established');
+ for(const p of c.parking){assert.ok(Math.abs(multiArea(p.geometry)-13)<.001);for(const b of c.buildings)assert.ok(overlapArea(p.geometry,b.geometry)<.001);}
+ assert.ok(Math.abs(multiArea(c.maneuver[0])-3*2.6*6)<.001);
+ for(const b of c.buildings)assert.ok(overlapArea(c.maneuver[0],b.geometry)<.001);
+ assert.ok(c.parking[0].geometry[0][0].every(p=>(p[1]-origin[1])*111195<14),'parking court is at mapped street edge');
+});
+
+test('a failed test cannot displace a reviewed positive result or become a selectable alternative',async()=>{
+ const narrow={...evidence,selectedArea:{geometry:rect(0,0,16,40)},parcel:{...evidence.parcel,geometry:rect(0,0,16,40)}};
+ const entry={input:{priorities:{purpose:'Affordable housing',choices:[]}},result:{housingRoute:'supported'},session:{snapshot:()=>structuredClone(narrow),context:()=>structuredClone(narrow),toolDefinitions:()=>[],renewSignal(){}}};
+ const ids=[],errors=[];let round=0;
+ const steps=[['interpret_priorities',{items:[{label:'Housing',meaning:'Explore housing',original_excerpt:'Affordable housing',kind:'goal',target:'homes'}]}],['plan_housing_options',{options:options.slice(0,2)}],['test_layout',{...base,homes:2,option_id:'option-1'}],['review_layout',()=>({concept_id:ids[0]})],['test_layout',{...base,width:16,depth:24,option_id:'option-2'}],['review_layout',()=>({concept_id:ids[1]})],['select_layout',()=>({concept_id:ids[1],rationale:'Unplaced',support:[]})],['select_layout',()=>({concept_id:ids[0],rationale:'Placed',support:[]})]];
+ const run=createScenarioAgent({apiKey:'fixture',model:'fixture',resolveContext:()=>entry,reserve:()=>()=>{},optionAuditor:async()=>({accepted:true,issues:[]}),fetchImpl:async(_,request)=>{
+ const body=JSON.parse(request.body);for(const o of body.input.filter(i=>i.type==='function_call_output').map(i=>JSON.parse(i.output))){if(o.id&&o.metrics&&!ids.includes(o.id))ids.push(o.id);if(o.status==='tool-error')errors.push(o.message);}
+ const [name,args]=steps[round++];return new Response(JSON.stringify({output:[{type:'function_call',call_id:'c'+round,name,arguments:JSON.stringify(typeof args==='function'?args():args)}]}));}});
+ const r=await run({assessmentVersion:'a'.repeat(20)});assert.equal(r.options.length,1);assert.equal(r.explorations.length,1);assert.equal(r.explorations[0].concept.status,'no-fit');assert.equal(r.testHistory.length,2);assert.ok(errors.some(e=>e.includes('Select a reviewed placed arrangement')));
 });
