@@ -1,3 +1,8 @@
+import {destinationSearch,destinationProperties} from './place-query.mjs';
+import {readNearbyPlaces,travelModes} from './place-routes.mjs';
+import {regulatoryPath,explicitNoZoning} from './regulatory-path.mjs';
+import {readSiteContext,readNearbySchools} from './site-context.mjs';
+import {readOvertureHeights} from './overture-heights.mjs';
 import {createPublishedCodeSession} from './published-code.mjs';
 import {createOfficialSession} from './official-sources.mjs';
 import {createPublicWebClient,sourceFailure} from './public-web.mjs';
@@ -18,6 +23,9 @@ export function evidencePassages(source){
 }
 const tool=(name,description,properties={},required=[])=>({type:'function',function:{name,description,parameters:{type:'object',properties,required,additionalProperties:false}}});
 export const researchTools=[
+  tool('read_site_context','Retrieve nearby mapped building footprints, explicit mapped heights, roads and amenities around the retained selected land. These are contextual OpenStreetMap features, not legal parcel/zoning or proof of vacancy/access. Choose this once early so the scene can develop while property research continues.',{radius_meters:{type:'integer',minimum:150,maximum:500}},[]),
+  tool('read_nearby_places','Find mapped destinations and measure actual travel routes along streets and paths. Interpret any requested destination category or named place. Supply OSM filters for categories or name_query for named places; the legacy categories school/police/hospital/clinic/pharmacy/supermarket/bus_stop can omit filters. Choose walking/driving/cycling from the original concern. After a missing result, revise tag filters, name or radius using the evidence. Availability is not guaranteed. Default to walking if unspecified and state the mode. Checks up to three geographically nearby candidates and chooses the shortest successfully routed result; never claims complete nearest coverage. No straight-line fallback. Include the exact original excerpt. Police travel is not response time or safety.',{...destinationProperties,mode:{type:'string',enum:travelModes},radius_meters:{type:'integer',minimum:500,maximum:50000},original_excerpt:{type:'string',minLength:2,maxLength:600}},['kind','mode','radius_meters','original_excerpt']),
+  tool('read_nearby_schools','Find mapped schools near the selected land and calculate the nearest result in a bounded search. Use early when a user asks about school proximity; include original_excerpt copied exactly from their priorities so the measured result can appear beside that concern while other research continues. Returns walking distance and route geometry along mapped streets/paths, with endpoint and search limitations. Never substitutes direct-line distance or establishes attendance assignment. May retry with a larger radius after no usable result.',{radius_meters:{type:'integer',minimum:500,maximum:50000},original_excerpt:{type:'string',minLength:2,maxLength:600}},['radius_meters']),
   tool('resolve_location','Resolve the user-selected outline to official municipality, active town/township and county identifiers. Start here; never substitute another location.'),
   tool('discover_map_sources','Discover trusted parcel or zoning polygon sources for this location. Returns source IDs and metadata; choose a source to query. Use search_scope regional after local sources fail or have no match; it searches wider catalogue pages. A different search hint can locate alternatives.',{kind:{type:'string',enum:['parcel','zoning']},search_hint:{type:'string',maxLength:80},search_scope:{type:'string',enum:['local','regional']}},['kind']),
   tool('read_map_source','Query ONE discovered source against the selected area (parcels) or matched parcel (zoning). Omit identifier_field when identifierField is supplied in discovery. It cannot be overridden. On failure or no match, choose another discovered source. Only if identifierField is absent, inspect identifierFields and supply identifier_field only when its meaning identifies a parcel, not a block/lot component or generic object ID. Never choose among ambiguous parcels for the user.',{source_id:{type:'string',maxLength:60},identifier_field:{type:'string',maxLength:100}},['source_id']),
@@ -31,7 +39,7 @@ export const researchTools=[
   tool('review_evidence','Inspect retrieved facts, conflicts, missing checks and available follow-up actions before writing the assessment. This performs no new lookups.'),
 ];
 export const progressLabels={resolve_location:'Identifying the local authority…',discover_map_sources:'Finding public property sources…',read_map_source:'Checking mapped property records…',read_planning_guidance:'Checking the authority’s development guidance…',search_code_sections:'Searching relevant housing provisions…',list_chapter_sections:'Reviewing the published development code…',read_code_sections:'Reading source provisions and exceptions…',read_housing_context:'Checking local housing needs…',review_evidence:'Reviewing evidence and remaining gaps…'};
-Object.assign(progressLabels,{discover_official_sources:'Finding the authority’s official publications…',read_official_source:'Reading official records and published rules…'});
+Object.assign(progressLabels,{read_site_context:'Bringing the surrounding buildings and streets into view…',read_nearby_schools:'Checking walking routes to mapped schools…',read_nearby_places:'Finding nearby places and following the streets to them…',discover_official_sources:'Finding the authority’s official publications…',read_official_source:'Reading official records and published rules…'});
 
 export function validateToolArguments(name,args){
   const definition=researchTools.find(t=>t.function.name===name)?.function.parameters;
@@ -42,8 +50,19 @@ export function validateToolArguments(name,args){
   for(const [k,value] of Object.entries(args)){
     const p=definition.properties[k];
     if(p.type==='string'&&(typeof value!=='string'||value.length>(p.maxLength??200)||value.length<(p.minLength??1)||p.enum&&!p.enum.includes(value)))throw new Error('Invalid tool argument');
+    if(k==='filters'){destinationSearch(args);continue;}
     if(p.type==='array'&&(!Array.isArray(value)||value.length<p.minItems||value.length>p.maxItems||value.some(v=>typeof v!=='string'||!v||v.length>p.items.maxLength)))throw new Error('Invalid tool argument');
     if(p.type==='integer'&&(!Number.isSafeInteger(value)||value<p.minimum||value>p.maximum))throw new Error('Invalid tool argument');
+  }
+  if(name==='read_nearby_places'){
+    destinationSearch(args);
+    // A category question must not acquire an invented literal place name.
+    // The model still chooses category tags; named filters quote user wording.
+    const original=args.original_excerpt.replace(/\s+/g,' ').toLowerCase();
+    const names=[args.name_query,...(args.filters??[]).flatMap(g=>g.tags.filter(t=>['name','brand','operator'].includes(t.key)).map(t=>t.value))].filter(Boolean);
+    if(names.some(n=>!original.includes(n.replace(/\s+/g,' ').toLowerCase())))throw new Error('A literal destination name must appear in the original question. For a category such as nearest library, omit name_query or set it to an empty string and remove name/brand/operator filters; use only category tags. Do not invent a public-access qualifier.');
+    const categories=(args.filters??[]).flatMap(g=>g.tags.filter(t=>!['name','brand','operator'].includes(t.key)).map(t=>t.value.replaceAll('_',' ').toLowerCase()));
+    if(names.some(n=>categories.includes(n.replace(/\s+/g,' ').toLowerCase())))throw new Error('The name filter repeats the destination category. For nearest-library or another category search, set name_query to an empty string and remove name/brand/operator filters. Otherwise you exclude places whose actual names do not contain the category word.');
   }
   return args;
 }
@@ -51,15 +70,17 @@ export function validateToolArguments(name,args){
 // Each session owns the selected geometry, accepted sources and section IDs.
 // The model chooses tools and follow-ups; it cannot supply arbitrary fetch URLs,
 // change the location, fabricate a source, or promote its prose into a record.
-export function createResearchSession(input,{read=createEvidenceClient(),webRead=createPublicWebClient(),now=Date.now,signal}={}){
+export function createResearchSession(input,{read=createEvidenceClient(),webRead=createPublicWebClient(),readHeights=readOvertureHeights,now=Date.now,signal}={}){
   const selected=selectedGeometry(input.points);
   const state={schemaVersion:2,caseId:digest(input.points).slice(0,20),generatedAt:new Date(now()).toISOString(),status:'partial',evidenceStatus:'retrieved-records',selectedArea:{geometry:selected,squareMeters:multiArea(selected)},locality:null,parcel:null,parcelCandidates:[],zones:[],housing:null,sources:[],gaps:[],code:[],assessment:null,checks:[],capacity:null,codeAccess:[],planningSystem:{type:'unresolved',sources:[],codeLinks:[]}};
   const sourceRead=(target,options={})=>read(target,{...options,signal});
   const layers=new Map(),sections=new Map(),chapters=new Map(),checks=new Map();
   const discoveredKinds=new Set(),regionalKinds=new Set();
-  const completed=new Set(),sourceAttempts=new Map(),conflicts=[];let codeCatalog,publishedCodes,officialPages,chapterTruncated=false,webReads=0,locationAttempts=0,specialControlAttempted=false;
+  const completed=new Set(),sourceAttempts=new Map(),conflicts=[];let codeCatalog,publishedCodes,officialPages,chapterTruncated=false,locationAttempts=0,specialControlAttempted=false;
   const specialFlags=()=>Object.entries(state.parcel?.attributes??{}).filter(([key,value])=>/spdist|special.?dist|histdist|historic|landmark/i.test(key)&&value&&!/^(0|none|no|n|not applicable)$/i.test(String(value))).map(([key,value])=>({field:key,value:String(value)}));
   state.retrievalFailures=[];
+  state.siteContext={status:'not-requested',buildings:[],roads:[],amenities:[]};state.priorityMeasurements=[];
+  const contextualAttempts=new Map(),priorityTexts=new Set([input.priorities?.purpose,input.priorities?.matters,...(input.priorities?.choices??[])].filter(Boolean));
   const official=()=>officialPages??=createOfficialSession({locality:state.locality,read:sourceRead,webRead,signal});
   const recordFailure=(name,url,error)=>{const f={name,url,...sourceFailure(error)};if(!state.retrievalFailures.some(e=>e.name===name&&e.url===url))state.retrievalFailures.push(f);};
   const linkedRead=async(target,options={})=>{const r=await webRead(target,{...options,signal});const data=JSON.parse(Buffer.from(r.data).toString('utf8'));if(data.error)throw new Error('Source query failed');return {...r,data};};
@@ -69,14 +90,14 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
   const catalog=async()=>{
     requireLocal();if(state.locality.boundaryUncertain)throw new Error('Jurisdiction must be confirmed before code retrieval');
     if(codeCatalog)return codeCatalog;
-    const client=await municipalClient(sourceRead,state.locality);if(!client)throw new Error('No connected code publisher matched this authority');
+    const client=await municipalClient(sourceRead,state.locality);for(const f of client?.discoveryFailures??[])if(!state.codeAccess.some(x=>x.url===f.url))state.codeAccess.push(f);if(!client)throw new Error('No connected code publisher matched this authority');
     const products=(await sourceRead(`${muni}/Products/clientId/${client.ClientID}`)).data.filter(p=>p.ContentType?.Id==='CODES').slice(0,3);
     const active=[];for(const product of products){const job=(await sourceRead(`${muni}/Jobs/latest/${product.ProductID}`)).data;if(job?.Id&&job.ProductId===product.ProductID)active.push({product,job});}
     codeCatalog={client,products:active};return codeCatalog;
   };
   const registerSection=(node,entry,client,trail=[])=>{
     const id=`section-${digest(`${entry.product.ProductID}:${entry.job.Id}:${node.Id}`).slice(0,16)}`;
-    sections.set(id,{node:node.Id,title:plain(node.Heading??node.Title),...entry,client});
+    sections.set(id,{context:trail.map(plain).join(' > ')||sections.get(id)?.context||'',node:node.Id,title:plain(node.Heading??node.Title),...entry,client});
     return {section_id:id,title:plain(node.Heading??node.Title),context:trail.map(plain).join(' > ')};
   };
   const registerChapters=()=>{
@@ -86,7 +107,7 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
     return [...chapters].map(([chapter_id,link])=>({chapter_id,title:link.label,url:link.url}));
   };
   const snapshot=()=>{
-    const result=structuredClone(state),gaps=[];
+    const result=structuredClone(state),gaps=[];result.officialRecovery=officialPages?.progress()??null;
     for(const source of result.sources){
       const columns=source.tableDistricts??[];
       if(columns.length&&result.zones.length&&!result.zones.some(z=>columns.some(c=>z.id===c||z.id.startsWith(c+'-'))))source.scopeConflict='The table columns are '+columns.join(', ')+', not the mapped districts '+result.zones.map(z=>z.id).join(', ')+'. Do not use this table to infer housing permission for the selected site.';
@@ -127,9 +148,10 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
     result.caseId=digest({points:input.points,parcel:result.parcel?.key,sources:result.sources.map(s=>({id:s.id,url:s.url,hash:s.hash})).sort((a,b)=>a.id.localeCompare(b.id))}).slice(0,20);return result;
   };
   const requiredFollowUps=()=>{
-    if(!state.locality)return locationAttempts<2?['resolve_location']:[];
-    if(state.parcelCandidates.length&&!state.parcel)return [];
+    if(!state.locality)return [...(locationAttempts<2?['resolve_location']:[]),...(!completed.has('read_site_context')?['read_site_context']:[])];
+    if(state.parcelCandidates.length&&!state.parcel)return completed.has('read_site_context')?[]:['read_site_context'];
     const required=[];
+    if(!completed.has('read_site_context'))required.push('read_site_context: retrieve surrounding buildings and streets for the selected land before finishing');
     if(!discoveredKinds.has('parcel'))required.push('discover_map_sources: discover parcel sources');
     for(const kind of ['parcel','zoning']){
       const missing=kind==='parcel'?!state.parcel:!state.zones.length&&state.planningSystem.type!=='no-zoning';
@@ -145,7 +167,7 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
     // Housing context is optional; it must not delay parcel/use research.
     if((!state.parcel||!state.code.length)&&!state.locality.authorityUnresolved){
       if(!completed.has('discover_official_sources'))required.push('discover_official_sources: recover missing parcel or code evidence through official websites');
-      else if(webReads<6&&officialPages?.choices().some(e=>!e.read))required.push('read_official_source: follow a relevant unread government or publication link to recover missing records. Prefer original ordinances or planning departments over overview pages.');
+      else if(officialPages?.frontier().length)required.push('read_official_source: governing evidence is still missing. Choose a relevant unread link from officialRecovery.remaining, prioritizing original code/development provisions. Navigation-only and failed reads are not governing evidence; do not repeat them.');
     }
     if(!state.locality.boundaryUncertain&&!state.code.length){
       if(!completed.has('search_code_sections')&&!completed.has('list_chapter_sections'))required.push('search_code_sections or list_chapter_sections: original housing provisions are still needed');
@@ -159,7 +181,7 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
   };
   const context=()=>{
     const r=snapshot();let chars=0;
-    return {status:r.status,assessmentScope:r.assessmentScope,locality:r.locality,selectedSquareMeters:r.selectedArea.squareMeters,parcel:r.parcel?{id:r.parcel.id,address:r.parcel.address,mappedSquareMeters:r.parcel.mappedSquareMeters,attributes:r.parcel.attributes}:null,spatial:r.spatial,parcelCandidates:r.parcelCandidates.map(p=>({id:p.id,key:p.key,address:p.address})),zoning:r.zones.map(z=>({id:z.id,description:z.description})),planningSystem:r.planningSystem.type,housing:r.housing,unresolved:r.gaps,checks:r.checks,completedTools:[...completed],requiredFollowUps:requiredFollowUps(),sources:r.sources.filter(s=>['code-provision','planning-guidance','mapped-record'].includes(s.kind)).filter(s=>{chars+=s.text.length;return chars<=65000;}).map(s=>({id:s.id,title:s.title,url:s.url,publication:s.publication,truncated:s.truncated,scopeConflict:s.scopeConflict,tableDistricts:s.tableDistricts,passages:evidencePassages(s)})),availableMapSources:[...layers].map(([source_id,l])=>({source_id,kind:l.kind,title:l.item.title,lastOutcome:sourceAttempts.get(source_id)??'not-queried'}))};
+    return {siteContext:{status:r.siteContext.status,version:r.siteContext.version,geometryVersion:r.siteContext.geometryVersion,buildingCount:r.siteContext.buildings.length,roadCount:r.siteContext.roads.length,coverage:r.siteContext.coverage},priorityMeasurements:r.priorityMeasurements,officialRecovery:officialPages?.progress()??null,codeAccess:r.codeAccess,status:r.status,assessmentScope:r.assessmentScope,locality:r.locality,selectedSquareMeters:r.selectedArea.squareMeters,parcel:r.parcel?{id:r.parcel.id,address:r.parcel.address,mappedSquareMeters:r.parcel.mappedSquareMeters,attributes:r.parcel.attributes}:null,spatial:r.spatial,parcelCandidates:r.parcelCandidates.map(p=>({id:p.id,key:p.key,address:p.address})),zoning:r.zones.map(z=>({id:z.id,description:z.description})),planningSystem:r.planningSystem.type,regulatoryPath:regulatoryPath(r),housing:r.housing,unresolved:r.gaps,checks:r.checks,completedTools:[...completed],requiredFollowUps:requiredFollowUps(),sources:r.sources.filter(s=>['code-provision','planning-guidance','mapped-record'].includes(s.kind)).filter(s=>{chars+=s.text.length;return chars<=65000;}).map(s=>({id:s.id,title:s.title,context:s.context,url:s.url,publication:s.publication,truncated:s.truncated,scopeConflict:s.scopeConflict,tableDistricts:s.tableDistricts,passages:evidencePassages(s)})),availableMapSources:[...layers].map(([source_id,l])=>({source_id,kind:l.kind,title:l.item.title,lastOutcome:sourceAttempts.get(source_id)??'not-queried'}))};
   };
   const execute=async(name,args={})=>{
     validateToolArguments(name,args);signal?.throwIfAborted();completed.add(name);
@@ -169,21 +191,40 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
       state.locality=found.locality;addSource(found.evidence);checks.set('Jurisdiction',found.locality.boundaryUncertain?'needs-review':'retrieved');return {locality:state.locality,source:found.evidence};
     }
     if(name==='review_evidence')return context();
+    if(name==='read_site_context'){
+      const radius=args.radius_meters??300,key='context:'+radius;if(contextualAttempts.has(key))return contextualAttempts.get(key);
+      if([...contextualAttempts.keys()].filter(k=>k.startsWith('context:')).length>=2)throw new Error('Context lookup already attempted. Retain existing map features.');
+      const context=await readSiteContext(input.points,{radiusMeters:radius,read:webRead,readHeights,signal});
+      if(context.status!=='unavailable'||state.siteContext.status==='not-requested')state.siteContext=context;
+      const overlapping=context.buildings.filter(b=>{try{return overlapArea(b.geometry,selected)>.1;}catch{return false;}});
+      const result={status:context.status,version:context.version,geometryVersion:context.geometryVersion,buildingCount:context.buildings.length,roadCount:context.roads.length,selectedLandMappedBuildings:overlapping.map(b=>({id:b.id,name:b.name,sourceUrl:b.sourceUrl})),coverage:context.coverage,note:'Scene geometry is retained server-side. Mapped context is separate from legal parcel and zoning evidence. Missing mapped buildings do not establish vacancy.'};contextualAttempts.set(key,result);return result;
+    }
+    if(name==='read_nearby_schools'||name==='read_nearby_places'){
+      const excerpt=args.original_excerpt?.trim();if(excerpt&&![...priorityTexts].some(t=>t.includes(excerpt)))throw new Error('Choose an exact original excerpt from the user priorities.');
+      const kind=name==='read_nearby_schools'?'school':args.kind,mode=args.mode??'walking';const search=destinationSearch({kind,filters:args.filters,name_query:args.name_query}),searchKey=digest(search);const key='place:'+searchKey+':'+mode+':'+args.radius_meters;let base=contextualAttempts.get(key);
+      if(!base){
+        if([...contextualAttempts.keys()].filter(k=>k.startsWith('place:'+searchKey+':')).length>=3)throw new Error('This destination search has already been attempted at three settings. Retain the returned result and its uncertainty.');
+        const measurement=await readNearbyPlaces(input.points,{kind,filters:args.filters,name_query:args.name_query,mode,radiusMeters:args.radius_meters,read:webRead,signal});base={status:measurement.status,measurement};contextualAttempts.set(key,base);
+      }
+      const measurement=structuredClone(base.measurement);if(excerpt){measurement.originalExcerpt=excerpt;measurement.id+='-'+digest(excerpt).slice(0,6);}
+      if(!state.priorityMeasurements.some(m=>m.id===measurement.id))state.priorityMeasurements.push(measurement);
+      return {status:measurement.status,measurement};
+    }
     requireLocal();
     if(name==='discover_official_sources'){
       const result=await official().discover();for(const f of result.failures)if(!state.retrievalFailures.some(e=>e.url===f.url))state.retrievalFailures.push({name:'Official website discovery',...f});return result;
     }
     if(name==='read_official_source'){
-      webReads++;const result=await official().inspect(args.source_id,args.page_start??1);
+      const result=await official().inspect(args.source_id,args.page_start??1);
       if(result.mapSource){
         if(!args.kind)return {status:'kind-needed',note:'This is a mapped service. Choose kind parcel or zoning according to the link and service metadata.'};
         const e=result.mapSource;
         const found=await discoverLayers(linkedRead,state.locality,input.points,args.kind,'','local',[{id:digest(e.url).slice(0,32),url:e.url,title:e.title,authorityProof:e.proof,sourcePage:e.proof.at(-1)?.url??e.url}]);
         return {sources:found.map(l=>{const id=`${args.kind}-${digest(l.url).slice(0,16)}`;layers.set(id,{...l,kind:args.kind,linked:true});return {source_id:id,kind:args.kind,title:l.meta.name||l.item.title,identifierField:l.identifierField,identifierFields:l.identifierField?[]:l.identifierFields};}),discovery:found.diagnostics,note:'Query a returned map source to establish an actual parcel or zoning match.'};
       }
-      for(const s of result.sources??[]){addSource(s);if(s.kind==='code-provision'&&!state.code.includes(s.id))state.code.push(s.id);}
+      for(const s of result.sources??[]){addSource(s);if(s.kind==='code-provision'&&!state.code.includes(s.id))state.code.push(s.id);const statement=s.scope==='authority'&&explicitNoZoning(s.text,state.locality);if(statement){state.planningSystem={...state.planningSystem,type:'no-zoning',sources:[...(state.planningSystem.sources??[]).filter(x=>x.id!==s.id),{...s,statement}]};}}
       if(result.sources?.length)checks.set('Official publications','retrieved');
-      if(['access-blocked','rate-limited','timed-out','source-error','not-found','source-too-large','unreadable-document'].includes(result.status)&&!state.retrievalFailures.some(f=>f.url===result.url))state.retrievalFailures.push({name:'Official publication',url:result.url,status:result.status,message:result.message});
+      if(['access-blocked','rate-limited','timed-out','source-error','not-found','source-too-large','unreadable-document'].includes(result.status)&&!state.retrievalFailures.some(f=>f.url===result.url))state.retrievalFailures.push({name:'Official publication',url:result.url,status:result.status,message:result.message,diagnostic:result.diagnostic});
       return {...result,sources:(result.sources??[]).map(s=>({...s,passages:evidencePassages(s)}))};
     }
     if(name==='discover_map_sources'){
@@ -214,15 +255,16 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
       return {zones:found.records.map(z=>({id:z.id,description:z.description,attributes:z.attributes})),coverage:state.zoningCoverage,spatial:snapshot().spatial,chapters:registerChapters(),source:{id:found.evidence.id,url:found.evidence.url}};
     }
     if(name==='read_planning_guidance'){
-      state.planningSystem=await planningContext(sourceRead,state.locality);for(const s of state.planningSystem.sources)addSource(s);checks.set('Planning guidance',state.planningSystem.sources.length?'retrieved':'unresolved');
-      return {planningSystem:state.planningSystem.type,sources:state.planningSystem.sources.map(s=>({id:s.id,title:s.title,url:s.url,passages:evidencePassages(s)})),chapters:registerChapters()};
+      state.planningSystem=await planningContext(sourceRead,state.locality,{webRead,discoverRoots:()=>official().discover()});for(const f of state.planningSystem.failures??[])if(!state.retrievalFailures.some(x=>x.url===f.url))state.retrievalFailures.push({name:'Planning discovery',...f});for(const s of state.planningSystem.sources)addSource(s);checks.set('Planning guidance',state.planningSystem.sources.length?'retrieved':'unresolved');
+      return {planningSystem:state.planningSystem.type,sources:state.planningSystem.sources.map(s=>({id:s.id,title:s.title,url:s.url,passages:evidencePassages(s)})),chapters:registerChapters(),failures:state.planningSystem.failures};
     }
     if(name==='read_housing_context'){
       const housing=await housingContext(sourceRead,state.locality);state.housing={...housing};delete state.housing.evidence;addSource(housing.evidence);checks.set('Housing context','retrieved');return {housing:state.housing,source:housing.evidence};
     }
     if(name==='search_code_sections'&&(/special|historic|landmark/i.test(args.query)||specialFlags().some(f=>f.value.length>=3&&args.query.toLowerCase().includes(f.value.toLowerCase()))))specialControlAttempted=true;
     let c;try{c=await catalog();}catch(error){
-      if(name==='search_code_sections'){const result=await published().search(args.query);state.codeAccess=result.failures??[];return result;}
+      for(const f of error.failures??[{url:'https://library.municode.com/',...sourceFailure(error)}])if(!state.codeAccess.some(x=>x.url===f.url))state.codeAccess.push(f);
+      if(name==='search_code_sections'){const result=await published().search(args.query);for(const f of result.failures??[])if(!state.codeAccess.some(x=>x.url===f.url))state.codeAccess.push(f);return {...result,failures:state.codeAccess,recovery:'Choose official source discovery and follow relevant published navigation. A failed catalog is not evidence that no code exists.'};}
       if(name==='read_code_sections'&&args.section_ids.every(id=>published().has(id)))c=null;
       else throw error;
     }
@@ -252,8 +294,8 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
           const $=load(doc.Content);$('script,style').remove();$('tr').each((_,row)=>{const cells=$(row).find('th,td').map((_,cell)=>$(cell).text().replace(/\s+/g,' ').trim()).get();$(row).replaceWith($('<p>').text(cells.join(' | ')));});
           const full=$.text().replace(/\s+/g,' ').trim();if(full.length<50)continue;
           const sourceId=`code-${digest(`${entry.product.ProductID}:${doc.Id}`).slice(0,16)}`;
-          const source={id:sourceId,kind:'code-provision',title:plain(doc.Title),section:plain(doc.Title),publisher:`${entry.client.ClientName} · ${entry.product.ProductName}`,url:`https://library.municode.com/${state.locality.stateAbbr.toLowerCase()}/${encodeURIComponent(entry.client.ClientName.toLowerCase().replaceAll(' ','_'))}/codes/${encodeURIComponent(entry.product.ProductName.toLowerCase().replaceAll(' ','_'))}?nodeId=${encodeURIComponent(doc.Id)}`,queryUrl:response.url,hash:response.hash,retrievedAt:response.retrievedAt,text:full.slice(0,14000),truncated:full.length>14000,publication:plain(entry.job.BannerText),amendmentsPending:doc.IsAmended===true||(doc.AmendedBy?.length??0)>0};
-          addSource(source);if(!state.code.includes(sourceId))state.code.push(sourceId);result.push({id:sourceId,title:source.title,publication:source.publication,truncated:source.truncated,passages:evidencePassages(source)});
+          const source={id:sourceId,kind:'code-provision',title:plain(doc.Title),context:entry.context,section:plain(doc.Title),publisher:`${entry.client.ClientName} · ${entry.product.ProductName}`,url:`https://library.municode.com/${state.locality.stateAbbr.toLowerCase()}/${encodeURIComponent(entry.client.ClientName.toLowerCase().replaceAll(' ','_'))}/codes/${encodeURIComponent(entry.product.ProductName.toLowerCase().replaceAll(' ','_'))}?nodeId=${encodeURIComponent(doc.Id)}`,queryUrl:response.url,hash:response.hash,retrievedAt:response.retrievedAt,text:full.slice(0,14000),truncated:full.length>14000,publication:plain(entry.job.BannerText),amendmentsPending:doc.IsAmended===true||(doc.AmendedBy?.length??0)>0};
+          addSource(source);if(!state.code.includes(sourceId))state.code.push(sourceId);result.push({id:sourceId,title:source.title,context:source.context,publication:source.publication,truncated:source.truncated,passages:evidencePassages(source)});
         }
       }
       checks.set('Published code',state.code.length?'retrieved':'unavailable');return {sources:result};
@@ -272,6 +314,6 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
     return [t];
   });
   const toolCacheKey=(name,args)=>name==='resolve_location'?String(locationAttempts):name==='read_map_source'&&layers.get(args.source_id)?.kind==='zoning'?(state.parcel?.key??'selected-area'):'';
-  const toolLane=(name,args)=>name==='resolve_location'||name==='review_evidence'?'exclusive':name==='read_map_source'?'geometry':/code|chapter/.test(name)?'code':/official/.test(name)?'official':name==='discover_map_sources'?'discovery-'+args.kind:name;
-  return {execute,snapshot,context,requiredFollowUps,toolDefinitions,toolCacheKey,toolLane};
+  const toolLane=(name,args)=>name==='resolve_location'||name==='review_evidence'?'exclusive':name==='read_map_source'?'geometry':/code|chapter/.test(name)?'code':/official/.test(name)?'official':name==='discover_map_sources'?'discovery-'+args.kind:name==='read_site_context'?'site-context':['read_nearby_schools','read_nearby_places'].includes(name)?'nearby-places':name;
+  return {execute,snapshot,context,requiredFollowUps,toolDefinitions,toolCacheKey,toolLane,addPriorityTexts:values=>{for(const value of values)if(typeof value==='string'&&value.length<=600&&priorityTexts.size<32)priorityTexts.add(value);},renewSignal:next=>{signal=next;officialPages?.renewSignal?.(next);}};
 }

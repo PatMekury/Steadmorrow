@@ -1,3 +1,9 @@
+## Daily call cap removed — September 25, 2026
+
+The user explicitly requested removal of Steadmorrow's local daily Gloo call limit. This supersedes all earlier instructions to retain the 480-call cap and all historical budget-block messages below. The live research service no longer reads, writes or enforces the daily ledger, and `GLOO_MAX_DAILY_CALLS` is no longer a supported setting. Existing ledger files are retained as historical files and do not block requests. Do not reintroduce a daily cap without a new user request.
+
+Per investigation, the existing 20 model rounds / 32 tool calls / 180-second duration remain, along with two concurrent runs, four starts per minute, cache/deduplication, source/citation validation, privacy protections and server-only credentials. This removes the artificial daily wait from the challenge's fast, credible property-read journey (Challenge Summary page 19); it does not establish completeness of any assessment or change Gloo account limits. Simulation, affordable-delivery verification and presentation work remain unfinished.
+
 # First findings implementation and verification
 
 Verified September 24–25, 2026. This records implemented work and remaining limitations; it is not a feasibility certification or a claim that the whole challenge is complete.

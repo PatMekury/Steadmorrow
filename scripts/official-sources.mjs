@@ -19,6 +19,7 @@ export function directoryMatches(text,locality){
   return csv(text).slice(1).flatMap(row=>{
     const [domain,type,organization,suborganization,,state]=row;
     if(state!==locality.stateAbbr||!domain?.endsWith('.gov')||/police|court|sheriff|school|library|water|fire|election|attorney|hospital/i.test(domain+' '+organization+' '+suborganization))return [];
+    if(type==='State'&&locality.state&&(key(organization)===key(locality.state)||key(organization)===key('State of '+locality.state)))return [{url:`https://${domain}/`,title:organization,scope:'state',proof:directoryUrl}];
     const a=authorities.find(a=>a.base&&a.type===type&&normalize(organization)===normalize(a.base));
     return a?[{url:`https://${domain}/`,title:organization,scope:a.scope,proof:directoryUrl}]:[];
   }).slice(0,6);
@@ -41,20 +42,20 @@ export function documentSource({text,title,url,hash,retrievedAt,scope,publisher,
   return {id:`official-${digest(url+':'+(page??'html')).slice(0,20)}`,kind,title:page?`${title} · PDF page ${page}`:title,section:page?`PDF page ${page}`:null,url:page?url+`#page=${page}`:url,hash,retrievedAt,publisher,text:content.slice(0,16000),truncated:truncated||content.length>16000,authorityProof:proof,publication:'Publication currency and later amendments require confirmation.',scope};
 }
 export function createOfficialSession({locality,read,webRead=createPublicWebClient(),pdf=readPdf,signal}={}){
-  const entries=new Map(),failures=[],visited=new Set();let discovered=false;
+  const entries=new Map(),failures=[],visited=new Set(),outcomes=new Map(),reads=new Map();let discovered=false;
   const register=(url,title,scope,proof,depth=0)=>{
     try{url=webUrl(url);if(entries.size>=180)return null;const id=`web-${digest(url).slice(0,16)}`;if(!entries.has(id))entries.set(id,{url,title:tidy(title).slice(0,180),scope,proof,depth});return {source_id:id,...entries.get(id),read:visited.has(id)};}catch{return null;}
   };
-  const choices=()=>[...entries].map(([source_id,e])=>({source_id,title:e.title,url:e.url,scope:e.scope,read:visited.has(source_id),format:gis(e.url)?'gis':/\.pdf(?:$|\?)/i.test(e.url)?'pdf':'web'}));
+  const choices=()=>[...entries].map(([source_id,e])=>({source_id,title:e.title,url:e.url,scope:e.scope,read:visited.has(source_id),outcome:outcomes.get(source_id)??'unread',priority:/ordinance|municipal.code|development.reg|land.use|zoning.code|chapter|article/i.test(e.title+' '+new URL(e.url).pathname)?100:/planning|zoning/i.test(e.title+' '+new URL(e.url).pathname)?80:e.scope==='authority'?40:10,format:gis(e.url)?'gis':/\.pdf(?:$|\?)/i.test(e.url)?'pdf':'web'}));
   const discover=async()=>{
     if(!discovered){discovered=true;
       try{const r=await webRead(directoryUrl,{ttl:86400000,signal});for(const e of directoryMatches(Buffer.from(r.data).toString('utf8'),locality))register(e.url,e.title,e.scope,[{url:e.proof,hash:r.hash,retrievedAt:r.retrievedAt}]);}catch(e){failures.push({url:directoryUrl,...sourceFailure(e)});}
       // A second, independent official website directory also covers non-.gov governments.
-      try{const c=await municipalClient(read,locality);if(c?.Website)register(/^https?:/i.test(c.Website)?c.Website.replace(/^http:/,'https:'):`https://${c.Website}`,c.ClientName,'authority',[{url:`https://library.municode.com/api/Clients/stateAbbr?stateAbbr=${locality.stateAbbr}`}]);}catch(e){failures.push({url:'https://library.municode.com/',...sourceFailure(e)});}
+      try{const c=await municipalClient(read,locality);failures.push(...(c?.discoveryFailures??[]));if(c?.Website)register(/^https?:/i.test(c.Website)?c.Website.replace(/^http:/,'https:'):`https://${c.Website}`,c.ClientName,'authority',[{url:`https://library.municode.com/api/Clients/stateAbbr?stateAbbr=${locality.stateAbbr}`}]);}catch(e){failures.push(...(e.failures??[{url:'https://library.municode.com/',...sourceFailure(e)}]));}
     }
     return {sources:choices(),failures,note:'Choose an official source ID and follow its published navigation. Directory matches establish a publisher, not legal applicability. No matching directory entry does not prove no website exists.'};
   };
-  const inspect=async(id,start=1)=>{
+  const inspectPage=async(id,start=1)=>{
     const entry=entries.get(id);if(!entry)throw new Error('Choose an official source ID returned by discovery');visited.add(id);
     if(gis(entry.url))return {status:'gis-source',mapSource:entry};
     try{
@@ -72,7 +73,7 @@ export function createOfficialSession({locality,read,webRead=createPublicWebClie
         return {status:'navigation',sources:[],links,note:'Choose the parcel or zoning service; a service catalogue alone is not a record.'};
       }
       const response=await webRead(entry.url,{signal,maxBytes:/pdf/i.test(entry.title+' '+entry.url)?16_000_000:6_000_000}),buffer=Buffer.from(response.data);
-      const proof=[...entry.proof,{url:response.url,hash:response.hash,retrievedAt:response.retrievedAt}],base={url:response.url,hash:response.hash,retrievedAt:response.retrievedAt,scope:entry.scope,publisher:locality.label,proof};
+      const proof=[...entry.proof,...(response.redirects??[]).map(r=>({url:r.from,redirectTo:r.to,status:r.status})),{url:response.url,hash:response.hash,retrievedAt:response.retrievedAt}],base={url:response.url,hash:response.hash,retrievedAt:response.retrievedAt,scope:entry.scope,publisher:entry.scope==='state'?locality.state:locality.label,proof};
       if(buffer.subarray(0,5).toString()==='%PDF-'){
         const result=await pdf(buffer,start,{signal});
         const sources=result.pages.map(p=>documentSource({...base,title:entry.title,text:p.text,page:p.page,truncated:p.truncated})).filter(Boolean);
@@ -81,6 +82,7 @@ export function createOfficialSession({locality,read,webRead=createPublicWebClie
       }
       if(!/html|text\//i.test(response.contentType??'')&&!buffer.toString('utf8',0,300).includes('<'))return {status:'unsupported-format',sources:[],note:'Choose a readable HTML or PDF publication.'};
       const $=load(buffer.toString('utf8')),links=[];let count=0,linkBase=response.url;
+      for(const [aliasId,e] of entries)if(e.url===response.url)visited.add(aliasId);
       try{const b=new URL($('base[href]').first().attr('href')||response.url,response.url),host=new URL(response.url).hostname.split('.').slice(-2).join('.');if(b.hostname===host||b.hostname.endsWith('.'+host))linkBase=webUrl(b.href);}catch{}
       $('a[href],iframe[src]').each((_,node)=>{
         if(count>=1000)return;count++;const label=tidy($(node).text()||$(node).attr('title')),href=$(node).attr('href')||$(node).attr('src');let target;
@@ -97,12 +99,22 @@ export function createOfficialSession({locality,read,webRead=createPublicWebClie
       $('script,style,noscript,iframe,nav,header,footer,form,button,aside').remove();
       $('tr').each((_,tr)=>{$(tr).replaceWith($('<p>').text($(tr).find('th,td').map((_,td)=>tidy($(td).text())).get().join(' | ')));});
       const main=$('main').first().length?$('main').first():$('article').first().length?$('article').first():$('body');
-      const title=tidy($('h1').first().text()||$('title').text()||entry.title),text=main.text();
+      const title=tidy($('h1').first().text()||$('title').text()||entry.title);
+      main.find('h1,h2,h3,h4,p,div,li,section').append(' ');const text=main.text();
       const relevant=/planning|zoning|ordinance|housing|land.use|regulation|development.code/i.test(title)&&!skip.test(title);
       const source=relevant?documentSource({...base,title,text}):null;
-      const unique=[...new Map(links.map(l=>[l.source_id,l])).values()];unique.sort((a,b)=>Number(/parcel|assessor|zoning|ordinance|land.use|gis/i.test(b.title))-Number(/parcel|assessor|zoning|ordinance|land.use|gis/i.test(a.title)));
-      return {status:source?'retrieved':'navigation',sources:source?[source]:[],links:unique.slice(0,50).map(({proof,...l})=>l),truncated:unique.length>50,note:'Follow original code links for operative provisions. A guidance page or table of contents is not permission to build. Publication currency remains unverified.'};
+      const unique=[...new Map(links.map(l=>[l.source_id,l])).values()];unique.sort((a,b)=>Number(/zoning|ordinance|land.use|development.reg|chapter/i.test(b.title))-Number(/zoning|ordinance|land.use|development.reg|chapter/i.test(a.title)));
+      return {status:source?'retrieved':unique.length?'navigation':'irrelevant',sources:source?[source]:[],links:unique.slice(0,50).map(({proof,...l})=>l),truncated:unique.length>50,note:'Follow original code links for operative provisions. A guidance page or table of contents is not permission to build. Publication currency remains unverified.'};
     }catch(e){const failure={url:entry.url,...sourceFailure(e)};failures.push(failure);return {...failure,sources:[],alternatives:choices().filter(e=>!e.read).slice(0,12)};}
   };
-  return {discover,inspect,choices,has:id=>entries.has(id),entry:id=>entries.get(id),failures};
+  const inspect=async(id,start=1)=>{
+    const key=id+':'+start;if(reads.has(key))return {...structuredClone(await reads.get(key)),reused:true,note:'This source/page has already been attempted in this investigation. Choose another relevant unread source or a different unread PDF page.'};
+    const task=inspectPage(id,start).then(r=>{
+      const outcome=r.sources?.some(s=>s.kind==='code-provision')?'operative':r.sources?.length?'guidance':r.status==='navigation'?'navigation-only':r.status;
+      outcomes.set(id,outcome);return {...r,outcome};
+    });reads.set(key,task);return structuredClone(await task);
+  };
+  const frontier=()=>choices().filter(e=>!e.read&&e.priority>=40).sort((a,b)=>b.priority-a.priority).slice(0,12);
+  const progress=()=>({attempted:outcomes.size,operative:[...outcomes.values()].filter(v=>v==='operative').length,outcomes:choices().filter(e=>e.read).map(({source_id,url,outcome})=>({source_id,url,outcome})),remaining:frontier()});
+  return {discover,inspect,choices,frontier,progress,has:id=>entries.has(id),entry:id=>entries.get(id),failures,renewSignal:next=>{signal=next;}};
 }

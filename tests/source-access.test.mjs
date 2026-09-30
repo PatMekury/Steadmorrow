@@ -1,9 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
-import {tmpdir} from 'node:os';
-import {join} from 'node:path';
-import {createUsageBudget} from '../scripts/usage-budget.mjs';
 import {createPublicWebClient,publicAddress,webUrl,publicRequest} from '../scripts/public-web.mjs';
 import {createEvidenceClient} from '../scripts/evidence-client.mjs';
 import {createOfficialSession,directoryMatches,directoryUrl,documentSource} from '../scripts/official-sources.mjs';
@@ -39,10 +35,6 @@ test('shared GIS cache retains original retrieval time, expires, and does not ca
  const b=await read('https://example.gov/service');assert.equal(b.data.features[0].id,1);assert.equal(n,1);assert.equal(a.retrievedAt,b.retrievedAt);
  time+=900001;await read('https://example.gov/service');assert.equal(n,2);
  let attempts=0;const failed=createEvidenceClient({fetchImpl:async()=>{attempts++;return new Response('',{status:403});}});await assert.rejects(failed('https://example.gov/fail'));await assert.rejects(failed('https://example.gov/fail'));assert.equal(attempts,2);
-});
-test('model usage survives reconstruction, enforces rolling cap and fails closed on corrupt state',()=>{
- const dir=mkdtempSync(join(tmpdir(),'stead-budget-')),file=join(dir,'usage.json');let now=1_000;
- try{assert.equal(createUsageBudget({file,now:()=>now}).reserve('gloo',2,3),true);assert.equal(createUsageBudget({file,now:()=>now}).reserve('gloo',2,3),false);assert.equal(createUsageBudget({file,now:()=>now}).reserve('gloo',1,3),true);now+=86400001;assert.equal(createUsageBudget({file,now:()=>now}).reserve('gloo',3,3),true);writeFileSync(file,'broken');assert.throws(()=>createUsageBudget({file}).reserve('gloo',1,3));}finally{rmSync(dir,{recursive:true,force:true});}
 });
 test('Gloo can discover official links and read alternative provisions after a 403',async()=>{
  const text='Section 10. Residential uses. Housing shall be permitted only subject to the district use table and applicable development approvals. All exceptions must be checked.';

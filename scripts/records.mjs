@@ -1,4 +1,5 @@
 import {isPrivateRecordField} from '../input-privacy.js';
+import {boundaryLocation} from './boundary-location.mjs';
 import { load } from 'cheerio';
 import {jurisdictionFromGeographies,localityNames,sameJurisdiction} from './jurisdiction.mjs';
 import { createEvidenceClient, queryFeatures, digest, isSourceUrl } from './evidence-client.mjs';
@@ -32,7 +33,7 @@ export async function locate(read, points) {
   // Consistent corner lookups can still guide discovery when the center service
   // request fails. They do not prove the missing center or whole jurisdiction.
   const locality=centerLocality||(successful.length>=2&&successful.every(l=>sameJurisdiction(l,successful[0]))?successful[0]:null);
-  if (!locality) return null;
+  if (!locality) return boundaryLocation(read,points);
   locality.boundaryLookupIncomplete=responses.some(r=>!unpack(r));
   locality.boundaryUncertain=responses.some(r=>!sameJurisdiction(locality,unpack(r)));
   const response=responses.find(r=>unpack(r))?.value;

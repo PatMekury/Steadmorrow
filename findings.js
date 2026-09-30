@@ -1,3 +1,4 @@
+import {createSpatialExperience} from './spatial-experience.js';
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;};
 const formatArea=value=>`${new Intl.NumberFormat(undefined,{maximumFractionDigits:0}).format(value)} m²`;
 const date=value=>value?new Date(value).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}):'Date not supplied';
@@ -22,7 +23,12 @@ function support(container,items,sources){
 function disclosure(label,key){const d=el('details',undefined,'findings-detail');d.dataset.evidenceKey=key;d.append(el('summary',label));return d;}
 function spatialText(result){
   const zones=(result.spatial?.zones??[]).filter(z=>z.selectedSquareMeters>.5);
-  if(!result.parcel)return 'Your blue outline shows the land you selected. A matching property boundary has not arrived yet.';
+  if(!result.parcel){
+    const count=result.parcelCandidates?.length??0;
+    if(count>1)return `Your selection overlaps ${count} mapped parcels. Choose the property below to continue.`;
+    if(count===1)return 'A possible parcel match is available. Confirm it below to continue.';
+    return result.narrativeStatus==='researching'?'Checking public records for the property boundary.':'No parcel boundary was matched to this selection.';
+  }
   if(result.spatial?.selectedParcelCoverage<.98)return 'Part of your selection extends beyond this parcel. Only the overlapping land belongs to this mapped record.';
   if(zones.length===1&&result.spatial.selectedZoningCoverage>=.98)return `Your selected area falls in ${zones[0].id}.${result.zones.length>1?' A different district covers another part of the parcel.':''} The diagram shows where the mapped rules change.`;
   if(zones.length>1)return `Your selected area crosses ${zones.map(z=>z.id).join(' and ')}. The dividing line matters when applying the housing rules.`;
@@ -31,7 +37,8 @@ function spatialText(result){
 function siteView(result){
   const parcel=result.parcel?.geometry,selection=result.selectedArea?.geometry;
   if(!selection)return null;
-  const shapes=[parcel,selection].filter(Boolean),points=shapes.flat(3);
+  const candidates=(result.parcelCandidates??[]).filter(p=>!parcel).map(p=>p.geometry);
+  const shapes=[parcel,selection,...candidates].filter(Boolean),points=shapes.flat(3);
   const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);
   const cos=Math.cos(ys[0]*Math.PI/180),minX=Math.min(...xs),maxY=Math.max(...ys);
   const width=(Math.max(...xs)-minX)*cos,height=maxY-Math.min(...ys);
@@ -42,6 +49,7 @@ function siteView(result){
   svg.setAttribute('viewBox','0 0 480 320');svg.setAttribute('role','img');svg.setAttribute('aria-label','Property plan: mapped parcel, selected land, and retrieved zoning boundaries. North is up.');
   const draw=(shape,cls)=>{const p=document.createElementNS(ns,'path');p.setAttribute('d',pathData(shape));p.setAttribute('class',cls);p.setAttribute('fill-rule','evenodd');svg.append(p);return p;};
   if(parcel)draw(parcel,'site-parcel');
+  for(const [i,p] of (result.parcelCandidates??[]).entries())if(!parcel&&p.geometry){const path=draw(p.geometry,'site-candidate site-candidate-'+i);path.dataset.parcelKey=p.key;}
   const zonePaths=[];
   for(const [i,z] of (result.spatial?.zones??[]).entries())if(z.geometry?.length){const p=draw(z.geometry,`site-zone site-zone-${i%3}`);p.dataset.zone=z.id;zonePaths.push(p);}
   if(parcel)draw(parcel,'site-boundary');
@@ -52,6 +60,7 @@ function siteView(result){
   const bar=document.createElementNS(ns,'path');bar.setAttribute('d',`M32 282v5h${(barMetres/metresPerPixel).toFixed(1)}v-5`);bar.setAttribute('class','site-scale');svg.append(bar);label(32,306,`${barMetres} m`);
   const figure=el('figure',undefined,'site-view'),legend=el('figcaption',undefined,'site-legend');
   legend.append(el('span',`Selected land · ${formatArea(result.selectedArea.squareMeters)}`,'legend-selected'));
+  if(!parcel)for(const [i,p] of (result.parcelCandidates??[]).entries())legend.append(el('span',`Parcel ${p.id} · ${((p.overlapSquareMeters??0)/result.selectedArea.squareMeters*100).toFixed(1)}% of selection`,'legend-candidate legend-candidate-'+i));
   if(result.parcel)legend.append(el('span',`Mapped parcel · ${formatArea(result.parcel.mappedSquareMeters)}`,'legend-parcel'));
   figure.append(svg,legend);
   const explanation=el('p',spatialText(result),'site-explanation'),controls=el('div',undefined,'site-controls');
@@ -63,32 +72,35 @@ function siteView(result){
   figure.append(explanation);return figure;
 }
 function pendingAssessment(r){
-  if(r.researchError==='local-call-limit')return ['Housing research is paused',r.parcel?'The property evidence above is retained. The local Gloo call budget must become available before the housing assessment can continue.':'The selected area is retained. The local Gloo call budget was reached before the property research finished; this does not mean public records are unavailable.'];
   if(r.status==='needs-parcel')return ['Which property are you exploring?','Your selection crosses more than one mapped property. Choose the relevant parcel to keep its rules and development separate.'];
   if(r.locality?.boundaryUncertain)return ['The authority for this area needs resolving',r.locality.boundaryLookupIncomplete?'A location lookup failed for part of the outline. The retrieved parcel remains visible, but one authority’s rules cannot yet be applied to the whole area.':'The outline crosses a mapped government boundary. Housing rules may differ across it.'];
   if(r.parcel&&r.code?.length&&r.narrativeStatus!=='researching')return ['Property evidence is retained; the assessment did not finish',`${r.code.length} published provisions were retrieved alongside the property records. Retry findings to finish the interpretation; the source material remains available below.`];
   if(r.parcel)return [r.narrativeStatus==='researching'?'The property is matched. Checking the housing route…':'The land is matched; housing permission is unresolved',r.narrativeStatus==='researching'?'The parcel and your selected portion are shown above. Gloo is reading the provisions that determine whether new housing can be considered here.':`The mapped record identifies ${r.parcel.address||'this property'}. ${r.codeAccess?.length?'The authority’s code publisher could not be read, so its residential-use conditions remain unknown.':'The retrieved evidence does not yet establish a residential-use route for the selected land.'}`];
   return ['Locating the property and its housing rules',r.narrativeStatus==='researching'?'Gloo is selecting public sources for this location. Verified property evidence will appear here as it arrives.':'The available sources did not establish the property boundary. Return to the map to check the selected land, or retry the public records.'];
 }
-export function renderFindings(container,result,{onParcel}={}){
+export function renderFindings(container,result,{onParcel,onSimulate,scenario,simulationState,userPriorities}={}){
+  const readingSection=container.querySelector('.site-reading[open]')?.dataset.section;
   const focused=document.activeElement?.closest('details')?.dataset.evidenceKey;
-  const opened=new Set([...container.querySelectorAll('details[open]')].map(d=>d.dataset.evidenceKey));
+  const opened=new Set([...container.querySelectorAll('details[open]')].map(d=>d.dataset.evidenceKey).filter(Boolean));
   const sources=result.sources??[];
   container.replaceChildren();
   const identity=el('header',undefined,'property-identity');identity.append(el('h3',result.parcel?.address||'Your selected land','property-address'),el('p',[result.locality?.label, result.parcel?`Parcel ${result.parcel.id}`:null].filter(Boolean).join(' · '),'findings-location'));
   container.append(identity);
-  const visual=siteView(result);if(visual)container.append(visual);
+  const visual=siteView(result);
+  const workspace=createSpatialExperience({result,scenario,simulationState,onSimulate,userPriorities,plan:visual});
+  container.append(workspace.root);
+  const inspector=workspace.inspector;
   const landmark=Object.entries(result.parcel?.attributes??{}).find(([k,v])=>/^landmark$/i.test(k)&&v&&!/^(0|none|no|n)$/i.test(String(v)));
-  if(landmark){const context=el('p',`The property record flags a landmark designation: ${String(landmark[1]).toLowerCase()}. What it protects needs to be established for the selected land.`,'site-record-context');const source=sources.find(s=>s.id==='parcel');if(source){const a=el('a',' Property record ↗');a.href=source.url;a.target='_blank';a.rel='noopener noreferrer';context.append(a);}container.append(context);}
+  if(landmark){const context=el('p',`The property record flags a landmark designation: ${String(landmark[1]).toLowerCase()}. What it protects needs to be established for the selected land.`,'site-record-context');const source=sources.find(s=>s.id==='parcel');if(source){const a=el('a',' Property record ↗');a.href=source.url;a.target='_blank';a.rel='noopener noreferrer';context.append(a);}inspector.append(context);}
   const fallback=pendingAssessment(result);
   const assessment=el('section',undefined,'housing-assessment');assessment.append(el('p','Affordable housing · first assessment','findings-kicker'),el('h3',result.assessment?.headline||fallback[0],'findings-answer'),el('p',result.assessment?.summary||fallback[1],'findings-answer-text'));
   if(result.assessment?.support?.length){const why=disclosure('Why this assessment','assessment');support(why,result.assessment.support,sources);assessment.append(why);}
-  container.append(assessment);
+  inspector.append(assessment);
   if(result.status==='needs-parcel'){
-    const choices=el('div',undefined,'parcel-choices');for(const p of result.parcelCandidates??[]){const b=el('button',undefined,'parcel-choice');b.type='button';b.append(el('span',p.address||`Parcel ${p.id}`),el('small',`${p.id} · ${formatArea(p.mappedSquareMeters)}`));b.addEventListener('click',()=>onParcel?.(p.key));choices.append(b);}container.append(choices);
+    const choices=el('div',undefined,'parcel-choices');for(const p of result.parcelCandidates??[]){const b=el('button',undefined,'parcel-choice');b.type='button';b.append(el('span',p.address||`Parcel ${p.id}`),el('small',`${p.id} · ${formatArea(p.overlapSquareMeters??0)} selected overlap · ${((p.overlapSquareMeters??0)/result.selectedArea.squareMeters*100).toFixed(1)}% of your selection`));b.addEventListener('click',()=>onParcel?.(p.key));choices.append(b);}inspector.append(choices);
   }
-  if(result.findings?.length){const reasons=el('div',undefined,'assessment-reasons');for(const f of result.findings){const row=el('section');row.append(el('h4',f.heading),el('p',f.summary));const why=disclosure('Read the supporting provision','finding-'+f.heading);support(why,f.support,sources);row.append(why);reasons.append(row);}container.append(reasons);}
-  if(result.obstacles?.length){const next=el('section',undefined,'assessment-decision'),o=result.obstacles[0];next.append(el('p','The next useful step','findings-kicker'),el('h4',o.heading),el('p',o.consequence),el('p',o.nextStep,'decision-action'));const why=disclosure('Evidence for this step','next-step');support(why,o.support,sources);next.append(why);if(result.obstacles.length>1){const more=el('section',undefined,'further-condition');const other=result.obstacles[1];more.append(el('h4',other.heading),el('p',other.consequence));const detail=disclosure('Next check & supporting evidence','further-condition');detail.append(el('p',other.nextStep));support(detail,other.support,sources);more.append(detail);next.append(more);}container.append(next);}
+  if(result.findings?.length){const reasons=disclosure('What supports this possibility','reasons');reasons.classList.add('assessment-reasons');for(const f of result.findings){const row=el('section');row.append(el('h4',f.heading),el('p',f.summary));const why=disclosure('Read the supporting provision','finding-'+f.heading);support(why,f.support,sources);row.append(why);reasons.append(row);}inspector.append(reasons);}
+  if(result.obstacles?.length){const next=el('section',undefined,'assessment-decision'),o=result.obstacles[0];next.append(el('p','The next useful step','findings-kicker'),el('h4',o.heading),el('p',o.consequence),el('p',o.nextStep,'decision-action'));const why=disclosure('Evidence for this step','next-step');support(why,o.support,sources);next.append(why);if(result.obstacles.length>1){const more=disclosure('Another condition to resolve','further-condition');const other=result.obstacles[1];more.append(el('h4',other.heading),el('p',other.consequence));const detail=disclosure('Next check & supporting evidence','further-condition');detail.append(el('p',other.nextStep));support(detail,other.support,sources);more.append(detail);next.append(more);}inspector.append(next);}
   const records=disclosure('Property evidence & sources','records');
   if(result.selectedArea?.geometry){const coordinates=disclosure('Selected corner coordinates','coordinates');coordinates.append(el('p',result.selectedArea.geometry[0][0].slice(0,-1).map(([lng,lat])=>lat.toFixed(8)+', '+lng.toFixed(8)).join(' · '),'selection-coordinates'));records.append(coordinates);}
   if(result.parcel){records.append(el('p',`Mapped parcel ${result.parcel.id}: ${formatArea(result.parcel.mappedSquareMeters)}. Selected land: ${formatArea(result.selectedArea.squareMeters)}.`));const table=el('dl',undefined,'property-fields');for(const [field,value] of Object.entries(result.parcel.attributes??{}).filter(([k])=>/bbl|lotarea|bldgarea|numbldgs|builtfar|residfar|spdist|histdist|landmark|zonedist/i.test(k))){table.append(el('dt',field),el('dd',value));}records.append(table);}
@@ -97,7 +109,9 @@ export function renderFindings(container,result,{onParcel}={}){
     const p=el('p',`${issue.name||'Code publication'}: ${issue.status?.replaceAll('-',' ')||issue.message||'could not be read'}. `);
     if(/^https:\/\//.test(issue.url??'')){const a=el('a','Open official source ↗');a.href=issue.url;a.target='_blank';a.rel='noopener noreferrer';p.append(a);}records.append(p);
   }
-  if(sources.length)container.append(records);
+  if(sources.length)inspector.append(records);
+  workspace.finish();
+  if(readingSection)workspace.openReading(readingSection);
   const cited=new Set([...(result.assessment?.support??[]),...(result.findings??[]).flatMap(f=>f.support??[]),...(result.obstacles??[]).flatMap(o=>o.support??[])].map(s=>s.sourceId));
   if(result.parcel)cited.add('parcel');if(result.zones?.length)cited.add('zoning');
   const printSources=el('section',undefined,'print-sources');printSources.append(el('h4','Evidence links'));

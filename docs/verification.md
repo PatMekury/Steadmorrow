@@ -1,3 +1,15 @@
+## Spatial First findings — September 26, 2026
+
+The user-authorized spatial workspace and Gloo scenario workflow are installed. All 100 tests and syntax checks pass. See [spatial-first-findings.md](spatial-first-findings.md) for exact live measurements, failed attempts, screenshot/browser checks and remaining limits. This does not establish legal capacity, affordability, finished slide generation or verified PDF pagination.
+
+## Daily call cap removed — September 25, 2026
+
+Verification of daily-cap removal: all 93 tests pass, including 482 mocked model calls within a single day and successful research with legacy full/locked/corrupt ledger files left untouched. `npm run check` and `git diff --check` pass. The server was restarted and the existing in-app preview reloaded. A live Gloo run progressed past the previous block and returned two Houston parcel candidates for the saved 556 m² outline; it now correctly requires the user's parcel choice. Neither candidate was selected automatically. This verifies removal of the daily block, not completed parcel-specific feasibility.
+
+The user explicitly requested removal of Steadmorrow's local daily Gloo call limit. This supersedes all earlier instructions to retain the 480-call cap and all historical budget-block messages below. The live research service no longer reads, writes or enforces the daily ledger, and `GLOO_MAX_DAILY_CALLS` is no longer a supported setting. Existing ledger files are retained as historical files and do not block requests. Do not reintroduce a daily cap without a new user request.
+
+Per investigation, the existing 20 model rounds / 32 tool calls / 180-second duration remain, along with two concurrent runs, four starts per minute, cache/deduplication, source/citation validation, privacy protections and server-only credentials. This removes the artificial daily wait from the challenge's fast, credible property-read journey (Challenge Summary page 19); it does not establish completeness of any assessment or change Gloo account limits. Simulation, affordable-delivery verification and presentation work remain unfinished.
+
 ## First findings rebuild — September 25, 2026
 
 Final live retest is currently blocked by the unchanged rolling-day 480-call Gloo budget. The last installed-browser run (19.220 s first evidence / 143.615 s final, nine provisions) lost its assessment to repeated copy-length validation. The final bounded-length fix passes a regression test but has not completed a new live Gloo run. Do not clear the ledger or raise the cap to bypass this. On September 25, the first reservations age out around 18:47 CDT, with twenty by 19:01 CDT. See the reports for exact boundaries.

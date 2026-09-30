@@ -1,0 +1,47 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {auditAssessment} from '../scripts/assessment-audit.mjs';
+import {createFindingsService,parseReview} from '../scripts/gloo.mjs';
+import {createOfficialSession,directoryUrl} from '../scripts/official-sources.mjs';
+
+const input={points:[{lat:30,lng:-95},{lat:30,lng:-94.999},{lat:30.001,lng:-94.999},{lat:30.001,lng:-95}],query:'Test',priorities:{purpose:'Affordable housing',matters:'',choices:[]}};
+const rule={id:'rule',kind:'code-provision',title:'Residential uses',context:'Residence district A',text:'Residential housing is permitted subject to the applicable approval conditions. This provision does not authorize construction before site review. Subdivision is required only if land is divided.'};
+const guidance={id:'guide',kind:'planning-guidance',title:'Development guidance',text:'The planning department reviews applications and the recorded property restrictions.'};
+const evidence={caseId:'test-evidence',status:'preliminary',assessmentScope:'matched-site',locality:{city:'Example',authority:{type:'municipality'}},code:['rule'],sources:[rule,guidance],parcel:{id:'test-parcel'},gaps:[],zones:[{id:'A'}]};
+const ref='rule::rule-p1',guide='guide::guide-p1';
+const draft=()=>({housingRoute:'supported',housingAnalysis:{support:[ref],applicability:'The residential use provision covers the matched district.',approvals:'The conditions of site review remain unresolved.',siteLimits:'Physical fit remains untested.',affordability:'Affordable delivery remains unestablished.'},assessment:{headline:'Housing may be possible, subject to site review',summary:'The recorded restrictions still need checking.',support:[guide]},findings:[{heading:'Site review',summary:'Its conditions remain unresolved.',support:[ref]}],obstacles:[{heading:'Site conditions',consequence:'The review conditions remain unresolved.',nextStep:'Confirm which conditions affect the proposed housing.',support:[ref]}]});
+const reply=(name,args,id='call')=>Response.json({status:'completed',output:[{type:'function_call',call_id:id,name,arguments:JSON.stringify(args)}]});
+const expand=value=>{value=structuredClone(value);for(const o of [value.housingAnalysis,value.assessment,...value.findings,...value.obstacles])o.support=o.support.map(r=>{const [sourceId,passageId]=r.split('::');return {sourceId,passageId};});return {output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(value)}]}]};};
+test('housing basis is independent of the short assessment citations and retains all four distinctions',()=>{
+ const value=parseReview(expand(draft()),evidence.sources,evidence);assert.equal(value.housingBasis,'zoning-use');assert.equal(value.assessment.support[0].sourceId,'guide');assert.equal(value.housingAnalysis.support[0].sourceId,'rule');assert.match(value.housingAnalysis.affordability,/unestablished/);
+});
+test('audit reads original sections including exceptions and rejects malformed acceptance',async()=>{
+ const narrative=parseReview(expand(draft()),evidence.sources,evidence);let body;
+ const audit=await auditAssessment({narrative,evidence,apiKey:'test-secret',model:'test',fetchImpl:async(_url,opts)=>{body=JSON.parse(opts.body);return reply('record_assessment_audit',{accepted:true,issues:[]});}});
+ assert.equal(audit.expertApproval,false);const provided=JSON.parse(body.input[0].content);assert.equal(provided.sources.find(s=>s.id==='rule').text,rule.text);assert.equal(provided.sources.find(s=>s.id==='rule').context,'Residence district A');assert(!JSON.stringify(body).includes('test-secret'));
+ await assert.rejects(auditAssessment({narrative,evidence,apiKey:'test',model:'test',fetchImpl:async()=>reply('record_assessment_audit',{accepted:true,issues:[{field:'assessment.summary',reason:'Unsupported subdivision obligation',correction:'Make it conditional.'}]})}),/invalid decision/);
+});
+test('source applicability rejection returns to Gloo for correction without repeating property research',async()=>{
+ let modelCalls=0,audits=0;const executed=[];
+ const service=createFindingsService({apiKey:'test',maxRounds:5,sessionFactory:()=>({snapshot:()=>evidence,execute:async name=>{executed.push(name);return {};}}),fetchImpl:async(_url,opts)=>{
+   const b=JSON.parse(opts.body);modelCalls++;
+   if(b.tools.some(t=>t.function.name==='record_assessment_audit')){audits++;return reply('record_assessment_audit',audits===1?{accepted:false,issues:[{field:'assessment.summary',claim:'The project requires subdivision approval.',sourceId:'rule',sourceQuote:'Subdivision is required only if land is divided.',reason:'Subdivision is conditional on dividing land; division has not been established.',correction:'Remove the universal subdivision requirement.'}]}:{accepted:true,issues:[]});}
+   if(modelCalls===1)return reply('review_evidence',{});
+   const d=draft();if(audits===0)d.assessment.summary='The project requires subdivision approval.';
+   else assert.match(JSON.stringify(b.input),/Subdivision is conditional/);
+   return reply('submit_assessment',d,'draft-'+modelCalls);
+ }});
+ const r=await service(input);assert.equal(r.narrativeStatus,'ready');assert.equal(r.research.modelCalls,5);assert.equal(audits,2);assert.deepEqual(executed,['review_evidence']);assert(!r.assessment.summary.includes('requires subdivision'));assert.equal(r.sourceReview.expertApproval,false);
+});
+test('failed review can resume the same sources with a new signal and no new session',async()=>{
+ let sessions=0,calls=0,renewed=0,fail=true;
+ const service=createFindingsService({apiKey:'test',sessionFactory:()=>{sessions++;return {snapshot:()=>evidence,execute:async()=>({}),renewSignal:()=>{renewed++;}};},fetchImpl:async(_url,opts)=>{calls++;const b=JSON.parse(opts.body);if(b.tools.some(t=>t.function.name==='record_assessment_audit'))return fail?new Response('',{status:503}):reply('record_assessment_audit',{accepted:true,issues:[]});if(!b.tools.some(t=>t.function.name==='submit_assessment'))return reply('review_evidence',{});return reply('submit_assessment',draft());}});
+ const first=await service(input);assert.equal(first.narrativeStatus,'unavailable');assert.equal(first.parcel.id,'test-parcel');fail=false;
+ const second=await service(input);assert.equal(second.narrativeStatus,'ready');assert.equal(second.research.resumedEvidence,true);assert.equal(sessions,1);assert.equal(renewed,1);assert(calls<10);
+});
+test('official-source recovery keeps previously discovered IDs when its aborted signal is renewed',async()=>{
+ const old=new AbortController(),next=new AbortController();let observed;
+ const locality={stateAbbr:'NJ',city:'Example',authority:{type:'municipality',base:'Example',name:'Example city'}};
+ const session=createOfficialSession({locality,signal:old.signal,read:async()=>{throw new Error('unavailable');},webRead:async(url,{signal})=>{observed=signal;signal.throwIfAborted();return {url,contentType:'text/html',hash:'test',data:Buffer.from(url===directoryUrl?'Domain name,Domain type,Organization name,Suborganization name,City,State\nexample.gov,City,City of Example,,Example,NJ\n':'<main>Planning department <a href="/code">Development ordinance</a></main>')};}});
+ const discovered=await session.discover();old.abort();session.renewSignal(next.signal);const page=await session.inspect(discovered.sources[0].source_id);assert.equal(observed,next.signal);assert(page.links.length);
+});

@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
+import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join,dirname,basename,resolve} from 'node:path';
 import {createFindingsService,handleFindings,validateInput,parseReview} from '../scripts/gloo.mjs';
 const input=()=>({points:[{lat:29.76,lng:-95.37},{lat:29.76,lng:-95.369},{lat:29.759,lng:-95.369},{lat:29.759,lng:-95.37}],query:'User supplied location',priorities:{purpose:'Housing conversations',matters:'',exploring:false,choices:['Understand local housing needs']}});
 const quote='Residential uses require approval under the conditions of this section.';
@@ -11,7 +14,7 @@ const payload=(a=answer())=>({status:'completed',output:[{type:'message',role:'a
 const call=(name,args={},id=name)=>({type:'function_call',call_id:id,name,arguments:JSON.stringify(args)});
 const response=output=>new Response(JSON.stringify({status:'completed',output}));
 const sessionFactory=()=>({execute:async()=>({ok:true}),snapshot:evidence});
-const options=extra=>({apiKey:'fixture-private',sessionFactory,fetchImpl:async(_url,opts)=>{const body=JSON.parse(opts.body);return body.input.some(x=>x.type==='function_call_output')?new Response(JSON.stringify(payload())):response([call('review_evidence')]);},...extra});
+const options=extra=>({assessmentAuditor:null,apiKey:'fixture-private',sessionFactory,fetchImpl:async(_url,opts)=>{const body=JSON.parse(opts.body);return body.input.some(x=>x.type==='function_call_output')?new Response(JSON.stringify(payload())):response([call('review_evidence')]);},...extra});
 
 test('invalid input makes no agent or lookup calls; missing key cannot silently fall back to scripted research',async()=>{
  let calls=0;const review=createFindingsService(options({sessionFactory:()=>{calls++;return sessionFactory();}}));
@@ -43,10 +46,10 @@ test('exact source quotations required; invented references and generated home c
  for(const change of [{support:[{sourceId:'invented',passageId:'code-1-p1'}]},{support:[{sourceId:'code-1',passageId:'invented'}]},{summary:'This site supports 40 homes.'},{summary:'<script>alert(1)</script>'}]){const a=answer();Object.assign(a.assessment,change);assert.throws(()=>parseReview(payload(a),evidence().sources));}
  assert.throws(()=>parseReview({...payload(),status:'incomplete'},evidence().sources));
 });
-test('deduplication shares the agent run; daily budget counts every model request',async()=>{
- let calls=0;const base=options();const review=createFindingsService({...base,maxDailyCalls:2,fetchImpl:async(...args)=>{calls++;return base.fetchImpl(...args);}});
+test('deduplication shares the agent run and changed inputs can start fresh research',async()=>{
+ let calls=0;const base=options();const review=createFindingsService({...base,fetchImpl:async(...args)=>{calls++;return base.fetchImpl(...args);}});
  const [a,b]=await Promise.all([review(input()),review(input())]);assert.equal(a.narrativeStatus,'ready');assert.deepEqual(a,b);assert.equal(calls,2);await review(input());assert.equal(calls,2);
- await assert.rejects(review({...input(),query:'Changed input'}),e=>e.status===429&&/budget/.test(e.message));assert.equal(calls,2);
+ assert.equal((await review({...input(),query:'Changed input'})).narrativeStatus,'ready');assert.equal(calls,4);
 });
 test('ambiguous parcels or unstable jurisdiction never receive a ready site assessment',async()=>{
  for(const change of [{status:'needs-parcel'},{locality:{boundaryUncertain:true}},{code:[]}]){const review=createFindingsService(options({sessionFactory:()=>({execute:async()=>({}),snapshot:()=>({...evidence(),...change})})}));assert.equal((await review(input())).narrativeStatus,change.code?'partial':'not-ready');}
@@ -90,9 +93,9 @@ test('incomplete research cannot offer repeated evidence reviews instead of a mi
  assert.equal((await review(input())).narrativeStatus,'ready');assert.equal(turn,3);
 });
 
-test('normal multi-turn property exploration is not stopped by the former 30-call single-response budget',async()=>{
+test('research continues past 480 model calls within one rolling day',async()=>{
  let now=0;const review=createFindingsService(options({now:()=>now}));
- for(let i=0;i<16;i++){now+=61000;const result=await review({...input(),query:'Property '+i});assert.equal(result.narrativeStatus,'ready');}
+ for(let i=0;i<241;i++){now+=61000;const result=await review({...input(),query:'Property '+i});assert.equal(result.narrativeStatus,'ready');}
 });
 
 test('zoning tool memoization changes with parcel geometry and cannot reuse the earlier selected-area result',async()=>{
@@ -150,7 +153,169 @@ test('a bulk-only citation cannot establish a supported housing-use route',()=>{
  assert.throws(()=>parseReview(payload(),e.sources),/Housing-use allowance unsupported/);
 });
 
-test('an official no-zoning system is not sent back to find a nonexistent use table',async()=>{
- let calls=0;const review=createFindingsService(options({sessionFactory:()=>({snapshot:()=>({...evidence(),planningSystem:{type:'no-zoning'}}),execute:async()=>({})}),fetchImpl:async()=>++calls===1?response([call('review_evidence')]):new Response(JSON.stringify(payload({...answer(),housingRoute:'unresolved'})))}));
+test('no-zoning recovery asks for development review instead of a nonexistent use table',async()=>{
+ let calls=0;const requests=[];const review=createFindingsService(options({sessionFactory:()=>({snapshot:()=>({...evidence(),planningSystem:{type:'no-zoning'}}),execute:async()=>({})}),fetchImpl:async(_url,options)=>{const body=JSON.parse(options.body);requests.push(body);calls++;return calls%2?response([call('review_evidence')]):new Response(JSON.stringify(payload({...answer(),housingRoute:'unresolved'})));}}));
+ const r=await review(input());assert.equal(r.narrativeStatus,'partial');assert.equal(calls,6);
+ const recoveries=requests.flatMap(r=>r.input).filter(x=>x.role==='user'&&typeof x.content==='string'&&x.content.includes('The authority confirms a no-comprehensive-zoning system'));
+ assert.ok(recoveries.length);assert.ok(recoveries.every(x=>JSON.parse(x.content).instruction.includes('Do not demand a zoning use table')));
+});
+
+test('legacy full, locked and corrupt daily ledgers cannot block research and remain untouched',async()=>{
+ const parent=resolve(tmpdir()),dir=await mkdtemp(join(parent,'stead-cap-removal-')),file=join(dir,'research-usage.json');
+ try{
+  await writeFile(file+'.lock','legacy lock');
+  for(const contents of [JSON.stringify({version:1,entries:Array.from({length:480},()=>({bucket:'gloo-model-calls',units:1,time:Date.now()}))}),'invalid legacy ledger']){
+   await writeFile(file,contents);
+   const review=createFindingsService(options({budgetFile:file,maxDailyCalls:1}));
+   const result=await review(input());assert.equal(result.narrativeStatus,'ready');assert.equal(result.research.modelCalls,2);
+   assert.equal(await readFile(file,'utf8'),contents);assert.equal(await readFile(file+'.lock','utf8'),'legacy lock');
+  }
+ }finally{
+  if(dirname(dir)!==parent||!basename(dir).startsWith('stead-cap-removal-'))throw new Error('Unexpected cleanup path');
+  await rm(dir,{recursive:true,force:true});
+ }
+});
+
+
+const submissionAnswer=(value=answer())=>{
+ const copy=structuredClone(value);
+ copy.housingAnalysis??={support:copy.assessment.support??support,applicability:'The original residential provision covers the proposed use subject to its approval conditions.',approvals:'Approval conditions need confirmation.',siteLimits:'Access remains unresolved.',affordability:'Affordable delivery has not been established.'};
+ copy.housingAnalysis.support=copy.housingAnalysis.support.map(s=>typeof s==='string'?s:s.sourceId+'::'+s.passageId);
+ for(const item of [copy.assessment,...copy.findings,...copy.obstacles])if(item.support)item.support=item.support.map(s=>typeof s==='string'?s:s.sourceId+'::'+s.passageId);
+ return copy;
+};
+const submit=(value,id='submit')=>response([call('submit_assessment',submissionAnswer(value),id)]);
+const researchTurn=n=>response([call('read_code_sections',{section_ids:['section-'+n]},'research-'+n)]);
+
+test('structured citation submission is available immediately after evidence review',async()=>{
+ let n=0;const review=createFindingsService(options({fetchImpl:async(_u,opts)=>{
+  n++;if(n===1)return response([call('review_evidence')]);
+  const body=JSON.parse(opts.body);assert.equal(body.tool_choice,'required');assert(body.tools.some(t=>t.function.name==='submit_assessment'));
+  if(n===2){const bad=answer();delete bad.assessment.support;return submit(bad,'early-incomplete');}
+  assert.match(JSON.stringify(body.input),/Missing assessmentSubmission.assessment.support/);return submit(answer(),'early-corrected');
+ }}));
+ const r=await review(input());assert.equal(r.narrativeStatus,'ready');assert.equal(r.research.modelCalls,3);assert.equal(r.research.events.at(-1).tool,'submit_assessment');assert.equal(r.research.events.at(-1).outcome,'validated');
+});
+test('submission cannot offer supported when no retained operative passage establishes the housing route',async()=>{
+ const retained={...evidence(),code:[],sources:[{...evidence().sources[0],kind:'planning-guidance'}]};let calls=0;
+ const review=createFindingsService(options({sessionFactory:()=>({snapshot:()=>retained,execute:async()=>({})}),fetchImpl:async(_u,opts)=>{if(++calls===1)return response([call('review_evidence')]);const schema=JSON.parse(opts.body).tools.find(t=>t.function.name==='submit_assessment').function.parameters;assert.deepEqual(schema.properties.housingRoute.enum,['unresolved']);return submit({...answer(),housingRoute:'unresolved'});}}));
  const r=await review(input());assert.equal(r.narrativeStatus,'partial');assert.equal(calls,2);
+});
+test('an unsupported citation can be corrected using operative evidence already retained',async()=>{
+ const retained={...evidence(),sources:[...evidence().sources,{id:'guidance',kind:'planning-guidance',text:'Development guidance describes the planning system, not site-specific housing permission.'}]};let calls=0;
+ const guidanceSupport=[{sourceId:'guidance',passageId:'guidance-p1'}];
+ const review=createFindingsService(options({sessionFactory:()=>({snapshot:()=>retained,execute:async()=>({})}),fetchImpl:async(_u,opts)=>{
+  if(++calls===1)return response([call('review_evidence')]);const schema=JSON.parse(opts.body).tools.find(t=>t.function.name==='submit_assessment').function.parameters;
+  if(calls===2){assert(schema.properties.housingRoute.enum.includes('supported'));const a=answer();a.assessment.support=guidanceSupport;return submit(a,'bad-positive');}
+  assert(schema.properties.housingRoute.enum.includes('supported'));return submit(answer(),'corrected-citation');
+ }}));
+ const r=await review(input());assert.equal(r.housingRoute,'supported');assert.equal(r.narrativeStatus,'ready');assert.equal(calls,3);
+});
+
+test('final submission requires complete nested fields and actual source-passage pairs, then recovers a missing field',async()=>{
+ let calls=0;const errors=[];
+ const filteredEvidence=()=>({...evidence(),sources:[...evidence().sources,{id:'title-only',kind:'code-provision',text:'Short heading'},{id:'wrong-district',kind:'code-provision',text:quote,scopeConflict:'Other district'},{id:'navigation-only',kind:'navigation',text:quote}]});
+ const review=createFindingsService(options({sessionFactory:()=>({snapshot:filteredEvidence,execute:async()=>({})}),onDiagnostic:e=>{if(e.type==='invalid-assessment')errors.push(e.reason);},fetchImpl:async(_u,opts)=>{
+  const body=JSON.parse(opts.body);calls++;
+  if(calls<=17)return researchTurn(calls);
+  if(calls===18)return response([call('review_evidence')]);
+  assert.equal(body.tool_choice,'required');assert.deepEqual(body.tools.map(t=>t.function.name),['submit_assessment']);
+  const schema=body.tools[0].function.parameters;
+  assert.deepEqual(schema.required,['housingAnalysis','housingRoute','assessment','findings','obstacles']);
+  for(const object of [schema.properties.assessment,schema.properties.findings.items,schema.properties.obstacles.items]){
+   assert.deepEqual(object.required,Object.keys(object.properties));assert.equal(object.additionalProperties,false);
+   assert.deepEqual(object.properties.support.items.enum,['code-1::code-1-p1']);assert.equal(object.properties.support.minItems,1);
+  }
+  if(calls===19){const bad=answer();delete bad.assessment.support;return submit(bad,'missing-support');}
+  assert.equal(calls,20);assert.match(JSON.stringify(body.input),/Missing assessmentSubmission.assessment.support/);
+  assert.ok(body.input.some(e=>e.type==='function_call_output'&&e.call_id==='missing-support'));
+  return submit(answer(),'corrected');
+ }}));
+ const r=await review(input());assert.equal(r.narrativeStatus,'ready');assert.equal(r.assessment.support[0].quote,quote);assert.equal(r.research.modelCalls,20);assert.equal(r.research.toolCalls,20);assert.equal(errors.length,1);assert.equal(r.research.events.at(-1).outcome,'validated');
+});
+
+test('late unsupported-use function submission recovers a cited partial within twenty calls',async()=>{
+ let calls=0;const executed=[],diagnostics=[];
+ const retained={...evidence(),sources:[{...evidence().sources[0],title:'Residential bulk regulations'}]};
+ const partial={...answer(),housingRoute:'unresolved',assessment:{headline:'Housing-use permission remains unresolved.',summary:'The retrieved bulk provision does not establish housing-use permission. Its applicability and an affordable delivery route remain unresolved.',support}};
+ const review=createFindingsService(options({sessionFactory:()=>({snapshot:()=>retained,execute:async name=>{executed.push(name);return {};}}),onDiagnostic:e=>diagnostics.push(e),fetchImpl:async(_u,opts)=>{
+  const body=JSON.parse(opts.body);calls++;
+  if(calls<=17)return researchTurn(calls);
+  if(calls===18){assert.deepEqual(body.tools.map(t=>t.function.name),['review_evidence']);return response([call('review_evidence')]);}
+  assert.equal(body.tool_choice,'required');assert.deepEqual(body.tools.map(t=>t.function.name),['submit_assessment']);
+  if(calls===19)return submit(answer(),'unsupported-use');
+  assert.equal(calls,20);assert.match(JSON.stringify(body.input),/Housing-use allowance unsupported/);return submit(partial,'partial');
+ }}));
+ const r=await review(input());assert.equal(r.narrativeStatus,'partial');assert.equal(r.housingRoute,'unresolved');assert.equal(r.assessment.summary,partial.assessment.summary);assert.equal(r.assessment.support[0].quote,quote);assert.equal(r.research.modelCalls,20);assert.equal(r.research.toolCalls,20);assert.equal(executed.at(-1),'review_evidence');assert.equal(diagnostics.filter(e=>e.type==='invalid-assessment').length,1);
+});
+
+test('structured finalization cannot bypass unfinished mandatory research checks',async()=>{
+ let calls=0;
+ const review=createFindingsService(options({sessionFactory:()=>({snapshot:evidence,requiredFollowUps:()=>['read_code_sections: operative exception still needs checking'],execute:async()=>({})}),fetchImpl:async(_u,opts)=>{
+  const body=JSON.parse(opts.body);calls++;
+  if(calls<=17)return researchTurn(calls);
+  if(calls===18)return response([call('review_evidence')]);
+  assert.equal(calls,19);assert.equal(body.tool_choice,'required');assert.match(JSON.stringify(body.input),/unfinishedChecks/);return submit();
+ }}));
+ const r=await review(input());assert.equal(r.narrativeStatus,'not-ready');assert.equal(r.assessment,undefined);assert.equal(r.research.modelCalls,19);assert.equal(r.research.toolCalls,19);assert.equal(r.parcel.id,'parcel-A');
+});
+
+test('structured finalization rejects unknown citation pairs and numeric claims without relaxing checks or limits',async()=>{
+ for(const change of [{summary:'The land fits 12 homes.'},{support:['invented::invented']}]){
+  let calls=0;const errors=[];const review=createFindingsService(options({onDiagnostic:e=>{if(e.type==='invalid-assessment')errors.push(e.reason);},fetchImpl:async()=>{
+   calls++;if(calls<=17)return researchTurn(calls);if(calls===18)return response([call('review_evidence')]);
+   const invalid=answer();Object.assign(invalid.assessment,change);return submit(invalid,'invalid-'+calls);
+  }}));
+  const r=await review(input());assert.equal(r.narrativeStatus,'unavailable');assert.equal(r.research.modelCalls,20);assert.equal(r.research.toolCalls,20);assert.equal(r.assessment,undefined);assert.equal(r.parcel.id,'parcel-A');assert.equal(errors.length,1);
+  assert.match(errors[0],change.summary?/Unsupported site capacity/:/assessmentSubmission.(?:housingAnalysis|assessment).support\[0\]/);
+ }
+});
+
+test('no research tool executes during the final reserve even if a model requests one',async()=>{
+ let calls=0;const executed=[];
+ const review=createFindingsService(options({sessionFactory:()=>({snapshot:evidence,execute:async(name,args)=>{executed.push({name,args});return {};}}),fetchImpl:async(_u,opts)=>{
+  calls++;if(calls<=17)return researchTurn(calls);
+  const body=JSON.parse(opts.body);
+  if(calls===18){assert.deepEqual(body.tools.map(t=>t.function.name),['review_evidence']);return response([call('read_code_sections',{section_ids:['forbidden-review-phase']},'closed-review')]);}
+  if(calls===19){assert.deepEqual(body.tools.map(t=>t.function.name),['submit_assessment']);return response([call('read_code_sections',{section_ids:['forbidden-submit-phase']},'closed-submit')]);}
+  assert.equal(calls,20);return submit();
+ }}));
+ const r=await review(input());assert.equal(r.narrativeStatus,'ready');assert.equal(executed.length,17);assert.ok(!executed.some(e=>e.args.section_ids?.some(id=>id.startsWith('forbidden'))));assert.equal(r.research.toolCalls,20);assert.equal(r.research.events.filter(e=>e.outcome==='rejected-finalization').length,2);
+});
+
+
+test('mapped landmark designation alone cannot establish a mandatory approval process',()=>{
+ const mapped={id:'parcel',kind:'mapped-record',title:'MAPPLUTO parcel',text:'Parcel record: LANDMARK = INDIVIDUAL LANDMARK; SPDist1 = MiD.'},mappedSupport=[{sourceId:'parcel',passageId:'parcel-p1'}];
+ const value=answer();value.obstacles=[{heading:'Landmark protection',consequence:'The landmark designation requires Landmarks Preservation Commission review.',nextStep:'Confirm the effect on the selected land.',support:mappedSupport}];
+ const sources=[...evidence().sources,mapped];
+ for(const consequence of [value.obstacles[0].consequence,'New work must obtain a permit.','An approval is required for new work.','Landmark review is mandatory.']){
+  value.obstacles[0].consequence=consequence;
+  assert.throws(()=>parseReview(payload(value),sources),/Unsupported approval obligation in obstacles\[0\].consequence/);
+ }
+ for(const consequence of ['The designation may need a review; confirm its effect on the selected land.','The designation may require Landmarks Preservation Commission review.','Confirm whether Landmarks Preservation Commission review is required.','Would new work require a permit?']){
+  value.obstacles[0].consequence=consequence;
+  assert.equal(parseReview(payload(value),sources).obstacles[0].consequence,consequence);
+ }
+});
+
+test('mandatory review can cite an original rule or official guidance without treating a map flag as that rule',()=>{
+ const value=answer();
+ value.obstacles=[{heading:'Landmark review',consequence:'The proposed work requires Landmarks Preservation Commission review.',nextStep:'Confirm how this provision applies to the selected work.',support:[{sourceId:'landmark-rule',passageId:'landmark-rule-p1'}]}];
+ for(const kind of ['code-provision','planning-guidance']){
+  const source={id:'landmark-rule',kind,title:'Landmark work review',text:'Proposed exterior work on a designated landmark requires commission review under this provision.'};
+  assert.equal(parseReview(payload(value),[...evidence().sources,source]).obstacles[0].consequence,value.obstacles[0].consequence);
+ }
+});
+
+test('headline plain-language guidance does not reject an otherwise sourced assessment for jargon',async()=>{
+ const value=answer();value.assessment.headline='Residential use allowed in C5; landmark and MiD limits remain';
+ assert.equal(parseReview(payload(value),evidence().sources).assessment.headline,value.assessment.headline);
+ let calls=0;const review=createFindingsService(options({fetchImpl:async(_u,opts)=>{
+  calls++;if(calls<=17)return researchTurn(calls);if(calls===18)return response([call('review_evidence')]);
+  const schema=JSON.parse(opts.body).tools[0].function.parameters;
+  assert.match(schema.properties.assessment.properties.headline.description,/everyday consequence/);
+  assert.match(schema.properties.assessment.properties.headline.description,/Do not put district codes/);
+  return submit(value);
+ }}));
+ assert.equal((await review(input())).narrativeStatus,'ready');
 });

@@ -1,6 +1,7 @@
 import { privateInputFields, hasPrivateInput, screenedLandSave, privacyMessage, addressPrivacyMessage } from './input-privacy.js';
 import { validatePolygon, areaSquareMeters, polygonCenter } from './geometry.js';
 import { renderFindings } from './findings.js';
+import {saveFindingsSession,readFindingsSession,savedFindingsMessage,mergeStudyEvidence} from './findings-session.js';
 
 const $ = id => document.getElementById(id);
 const storageKey = 'steadmorrow.land.v1';
@@ -11,6 +12,8 @@ const priorityChoices = ['Retain ownership', 'Understand local housing needs'];
 let priorities = { purpose: '', preserve: '', exploring: false, choices: [], saved: false };
 let mapView;
 let findingsOpen = false, findingsController, findingsSequence = 0, lastFindings = null;
+let scenarioResult=null,simulationState={},scenarioController,scenarioSequence=0;
+let restoredVisit=null;
 let parcelKey = null, parcelShape = '';
 let points = [], undoStack = [], mode = 'polygon', confirmed = false;
 let map, polygon, line, AdvancedMarkerElement, markers = [];
@@ -61,6 +64,7 @@ function persist() {
   $('save-status').textContent = storageAvailable
     ? privateInputFields({query: queryLabel, priorities}).length ? 'Selection saved. Flagged text has not been saved.' : privacySaveNotice ? 'Flagged text was removed from the saved draft. Your selection is kept.' : 'Saved in this browser.'
     : 'Kept for this visit. Browser storage is unavailable; refreshing will lose your work.';
+  saveFindingsVisit();
 }
 
 function remember() {
@@ -553,21 +557,96 @@ $('back-to-map').addEventListener('click', () => {
   });
 });
 function leaveFindings() {
+  saveFindingsVisit();
   findingsOpen = false;
+  cancelScenario();
   ++findingsSequence;
   findingsController?.abort();
+  workBanner('');
   $('findings-step').setAttribute('aria-busy', 'false');
   $('findings-progress').hidden = true;
 }
 
+function saveFindingsVisit() {
+  try{saveFindingsSession(sessionStorage,{input:findingsInput(),lastFindings,scenario:scenarioResult,simulationState},restoredVisit?.savedAt??Date.now());}catch{}
+}
+function restoreFindingsVisit() {
+  try{
+    const saved=readFindingsSession(sessionStorage,findingsInput(),{restoreParcel:true});
+    if(!saved)return;
+    parcelKey=saved.input.parcelKey;parcelShape=JSON.stringify(points);
+    lastFindings=saved.lastFindings;scenarioResult=saved.scenario;simulationState=saved.simulationState;restoredVisit=saved;
+    if(simulationState.question&&lastFindings.result.version?.assessment)studyQuestions.set(lastFindings.result.version.assessment,{question:simulationState.question,brief:simulationState.brief,refinement:simulationState.refinement});
+  }catch{}
+}
+function showSavedFindings() {
+  // Page restoration is display-only. It never calls the research or scenario
+  // endpoints; only an explicit findings/retry/refinement action can do that.
+  $('findings-step').setAttribute('aria-busy','false');
+  $('findings-progress').hidden=true;$('findings-error').hidden=true;
+  if(lastFindings?.signature===JSON.stringify(findingsInput())){
+    displayFindings(lastFindings.result);
+    workBanner(savedFindingsMessage(restoredVisit),'Saved findings');
+    $('findings-announcement').textContent=savedFindingsMessage(restoredVisit);
+  }else{
+    displayFindings({selectedArea:{geometry:[[points.map(p=>[p.lng,p.lat]).concat([[points[0].lng,points[0].lat]])]],squareMeters:areaSquareMeters(points)},sources:[],zones:[],narrativeStatus:'unavailable'});
+    workBanner('Your selection is saved. The previous findings are not available in this tab. Retry findings to run a new check.','Selection retained');
+    $('findings-announcement').textContent='Your selection is saved. Retry findings to start a new check.';
+  }
+}
+window.addEventListener('pagehide',saveFindingsVisit);
+const automaticStudies=new Set(),studyQuestions=new Map();
+function cancelScenario() {
+  if(simulationState.busy)automaticStudies.delete(lastFindings?.result.version?.assessment);
+  ++scenarioSequence;scenarioController?.abort();simulationState={};
+}
+function workBanner(message,phase='Checking your land') {
+  const banner=$('findings-loading');banner.hidden=!message;
+  banner.dataset.state=['Saved findings','Selection retained'].includes(phase)?'saved':'working';
+  if(message)banner.querySelector('p').textContent=message;
+  const phaseLabel=banner.querySelector('.work-banner-phase');if(phaseLabel)phaseLabel.textContent=phase;
+}
+function startAutomaticStudy(result) {
+  const version=result?.version?.assessment;
+  if(restoredVisit||!findingsOpen||!version||!result.parcel||result.status==='needs-parcel'||result.locality?.boundaryUncertain||result.locality?.authorityUnresolved)return;
+  const question=studyQuestions.get(version);if(question){simulationState={question:question.question,brief:question.brief,refinement:question.refinement};displayFindings(result);return;}
+  if(scenarioResult?.assessmentVersion===version||automaticStudies.has(version))return;
+  automaticStudies.add(version);if(automaticStudies.size>32)automaticStudies.delete(automaticStudies.values().next().value);
+  void simulateFindings();
+}
+async function simulateFindings(refinement='') {
+  if(!lastFindings?.result.version?.assessment)return;
+  restoredVisit=null;
+  scenarioController?.abort();const controller=new AbortController();scenarioController=controller;
+  const sequence=++scenarioSequence,assessmentVersion=lastFindings.result.version.assessment;studyQuestions.delete(assessmentVersion);
+  simulationState={busy:true,refinement,message:'Considering your priorities and testing a housing idea…'};workBanner(simulationState.message,'Exploring possibilities');displayFindings(lastFindings.result);
+  const timer=setTimeout(()=>controller.abort(),200000);
+  try{
+    const response=await fetch('/api/scenario',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/x-ndjson'},body:JSON.stringify({assessmentVersion,refinement}),signal:controller.signal});
+    if(!response.ok){const e=await response.json();throw new Error(e.error||'The exploration could not start.');}
+    const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',result;
+    while(true){const {done,value}=await reader.read();buffer+=decoder.decode(value,{stream:!done});const lines=buffer.split('\n');buffer=lines.pop();
+      for(const line of lines){if(!line.trim())continue;const event=JSON.parse(line);if(event.type==='error')throw new Error(event.error);if(event.type==='result')result=event.result;
+        if(event.type==='progress'&&sequence===scenarioSequence&&findingsOpen&&lastFindings?.result.version?.assessment===assessmentVersion){simulationState={...simulationState,busy:true,refinement,message:event.message,brief:event.brief??simulationState.brief};if(event.siteContext)lastFindings.result.siteContext=event.siteContext;if(event.priorityMeasurements)lastFindings.result.priorityMeasurements=event.priorityMeasurements;if(event.evidence?.siteContext)lastFindings.result.siteContext=event.evidence.siteContext;workBanner(event.message||'Testing a housing idea…','Exploring possibilities');if(event.brief||event.siteContext||event.evidence)displayFindings(lastFindings.result);}}
+      if(done)break;
+    }
+    if(sequence!==scenarioSequence||!findingsOpen||lastFindings.result.version?.assessment!==assessmentVersion)return;
+    if(!result)throw new Error('The exploration connection ended before a result arrived.');
+    if(result.status==='needs-input'){simulationState={question:result.question,brief:result.brief,refinement};studyQuestions.set(assessmentVersion,{...result,refinement});if(studyQuestions.size>32)studyQuestions.delete(studyQuestions.keys().next().value);}
+    else{lastFindings.result=await mergeStudyEvidence(findingsInput(),lastFindings.result,result);scenarioResult=result;simulationState={};}
+  }catch(e){if(sequence===scenarioSequence){automaticStudies.delete(assessmentVersion);simulationState={...simulationState,refinement,error:e.name==='AbortError'?'This exploration was interrupted. Your findings and land selection are kept.':e.message};}}
+  finally{clearTimeout(timer);if(sequence===scenarioSequence&&findingsOpen){simulationState.busy=false;workBanner('');displayFindings(lastFindings.result);}}
+}
 function displayFindings(result, progressive=false) {
   if(progressive&&result.sources?.length)$('findings-step').setAttribute('aria-busy','false');
-  renderFindings($('findings-content'), result, {onParcel: key => {
+  renderFindings($('findings-content'), result, {userPriorities:findingsInput().priorities,onSimulate:simulateFindings,scenario:scenarioResult?.assessmentVersion===result.version?.assessment?scenarioResult:null,simulationState,onParcel: key => {
     parcelKey = key; parcelShape = JSON.stringify(points); lastFindings = null;
+    scenarioResult=null;
     void showFindings();
   }});
   $('findings-content').hidden = false;
-  $('findings-announcement').textContent = progressive ? (!result.sources?.length?'Research has started.':result.parcel?'The property boundary is available. Housing research is continuing.':'Verified evidence has arrived.') : result.researchError === 'local-call-limit' ? 'Research is paused at the local Gloo call limit.' : result.assessment ? 'Your housing assessment is ready to review.' : 'Property research has finished. The available evidence is shown.';
+  saveFindingsVisit();
+  $('findings-announcement').textContent = progressive ? (!result.sources?.length?'Research has started.':result.parcel?'The property boundary is available. Housing research is continuing.':'Verified evidence has arrived.') : result.assessment && result.narrativeStatus==='ready' ? 'Your preliminary housing assessment is ready to review.' : result.assessment && !result.code?.length ? 'The property is matched, but the housing rules could not be retrieved. The housing check is incomplete.' : 'The housing check is incomplete. The records found so far are available.';
 }
 
 function findingsInput() {
@@ -575,6 +654,9 @@ function findingsInput() {
   return {points: copy(points), query: queryLabel, parcelKey, priorities: {purpose: priorities.purpose, matters: priorities.preserve, choices: priorities.choices, exploring: priorities.exploring}};
 }
 async function showFindings(retry = false) {
+  restoredVisit=null;
+  if(retry){automaticStudies.delete(lastFindings?.result.version?.assessment);studyQuestions.delete(lastFindings?.result.version?.assessment);scenarioResult=null;}
+  cancelScenario();
   if (!validatePriorityPrivacy(true)) return;
   if (!confirmed || !validatePolygon(points).valid) return;
   findingsController?.abort();
@@ -593,9 +675,8 @@ async function showFindings(retry = false) {
   render(); focusStep();
   if (lastFindings?.signature===signature) displayFindings(lastFindings.result);
   else displayFindings({selectedArea:{geometry:[[points.map(p=>[p.lng,p.lat]).concat([[points[0].lng,points[0].lat]])]],squareMeters:areaSquareMeters(points)},sources:[],zones:[],narrativeStatus:'researching'},true);
-  if (!retry && lastFindings?.signature === signature && Date.now() - lastFindings.time < (lastFindings.result.narrativeStatus === 'ready' ? 15 * 60 * 1000 : 30000)) { displayFindings(lastFindings.result); return; }
-  $('findings-loading').querySelector('p').textContent = 'Gloo is starting the property research…';
-  $('findings-loading').hidden = false;
+  if (!retry && lastFindings?.signature === signature && Date.now() - lastFindings.time < (lastFindings.result.narrativeStatus === 'ready' ? 15 * 60 * 1000 : 30000)) { displayFindings(lastFindings.result); startAutomaticStudy(lastFindings.result); return; }
+  workBanner('Bringing your land into view and checking the housing rules…');
   $('findings-step').setAttribute('aria-busy', 'true');
   const timer = setTimeout(() => controller.abort(), 200000);
   try {
@@ -613,7 +694,7 @@ async function showFindings(retry = false) {
         if (event.type === 'error') throw new Error(event.error);
         if (event.type === 'result') result = event.result;
         if (event.type === 'progress' && sequence === findingsSequence && findingsOpen) {
-          if(event.message)$('findings-loading').querySelector('p').textContent = event.message;
+          if(event.message)workBanner(event.message);
           if(event.evidence?.schemaVersion===2&&Array.isArray(event.evidence.sources)){
             lastFindings={signature,result:event.evidence,time:0};displayFindings(event.evidence,true);
           }
@@ -625,6 +706,7 @@ async function showFindings(retry = false) {
     if (sequence !== findingsSequence || !findingsOpen) return;
     if (!response.ok) throw new Error(result.error || 'The first-look service is unavailable. Please try again.');
     if (result.schemaVersion !== 2 || !Array.isArray(result.sources)) throw new Error('We couldn’t read these findings. Please try again.');
+    if(result.scenario?.assessmentVersion===result.version?.assessment){result=await mergeStudyEvidence(input,result,result.scenario);scenarioResult=result.scenario;}
     lastFindings = {signature, result, time: Date.now()};
     displayFindings(result);
   } catch (error) {
@@ -634,8 +716,9 @@ async function showFindings(retry = false) {
   } finally {
     clearTimeout(timer);
     if (sequence === findingsSequence) {
-      $('findings-loading').hidden = true;
+      if(!simulationState.busy)workBanner('');
       $('findings-progress').hidden = true;
+      if(lastFindings?.signature===signature&&lastFindings.time>0&&!controller.signal.aborted)startAutomaticStudy(lastFindings.result);
       $('findings-step').setAttribute('aria-busy', 'false');
     }
   }
@@ -675,6 +758,7 @@ document.querySelectorAll('[data-nudge]').forEach(button => button.addEventListe
 }));
 
 restore();
+restoreFindingsVisit();
 try{findingsOpen=confirmed&&sessionStorage.getItem('steadmorrow.findings.open')==='true';}catch{}
 $('priority-purpose').value = priorities.purpose;
 $('priority-preserve').value = priorities.preserve;
@@ -686,5 +770,5 @@ const observer = new IntersectionObserver(entries => {
   if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); if (!confirmed) initialize(); }
 }, { rootMargin: '250px' });
 observer.observe($('experience'));
-if(findingsOpen)void showFindings();
+if(findingsOpen)showSavedFindings();
 $('back-to-opening').addEventListener('click',()=>{leaveFindings();render();$('top').scrollIntoView({behavior:'instant'});document.querySelector('.brand').focus({preventScroll:true});});
