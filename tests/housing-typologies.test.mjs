@@ -89,7 +89,7 @@ test('Gloo chooses a form, observes an impossible apartment allocation, revises 
     const steps=[['interpret_priorities',{items:[{label:'Apartments',meaning:'Explore a small apartment mass.',original_excerpt:'Affordable apartments',kind:'goal',target:'homes'}]}],['test_layout',{...apartment,width:10,depth:12,homes_per_row:4}],['test_layout',{...apartment,homes_per_row:4}],['review_layout',()=>({concept_id:id})],['select_layout',()=>({concept_id:id,rationale:'A compact apartment mass leaves room around the building.',support:[]})]];
     const [name,a]=steps[n++];return new Response(JSON.stringify({output:[{type:'function_call',call_id:'c'+n,name,arguments:JSON.stringify(typeof a==='function'?a():a)}]}));
   };
-  const run=createScenarioAgent({apiKey:'fixture',model:'fixture',fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}});
+  const run=createScenarioAgent({optionCount:1,apiKey:'fixture',model:'fixture',fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}});
   const result=await run({assessmentVersion:'a'.repeat(20)});
   assert.equal(result.concept.typology,'apartment');assert.equal(result.concept.metrics.homes,12);assert.equal(n,5);
   assert.ok(errors.some(message=>message.includes('do not fit the floor area')));assert.equal(observedIgnoredNote,true);assert.equal(result.research.mode,'gloo-tool-agent');

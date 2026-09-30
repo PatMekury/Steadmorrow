@@ -130,7 +130,7 @@ test('direct published chapter links are resolved to actual child provisions',as
   throw new Error('Unexpected');};
  const r=await municipalCode(read,{city:'Example',stateAbbr:'WA'},[{id:'R',attributes:{CHAPTER_LINK:'https://library.municode.com/wa/example/codes/municipal_code?nodeId=chapter'}}]);assert.equal(r.evidence.length,1);assert.match(r.evidence[0].text,/require approval/);
 });
-test('multiple parcels require a choice, and incomplete zoning coverage cannot become a preliminary assessment',async()=>{
+test('adjacent parcels form one study, and incomplete zoning coverage cannot become a preliminary assessment',async()=>{
  const points=[{lng:-95,lat:29},{lng:-94.998,lat:29},{lng:-94.998,lat:29.001},{lng:-95,lat:29.001}];
  const fetchImpl=async url=>{const u=new URL(url);let data;
   if(u.hostname==='geocoding.geo.census.gov')data={result:{geographies:{States:[{NAME:'Washington',STUSAB:'WA',STATE:'53'}],Counties:[{NAME:'Sample County',BASENAME:'Sample',GEOID:'53123'}],'Incorporated Places':[{BASENAME:'Example',GEOID:'5312345'}]}}};
@@ -143,8 +143,8 @@ test('multiple parcels require a choice, and incomplete zoning coverage cannot b
   }else if(u.pathname.includes('Clients'))data=[];
   else throw new Error('Unexpected fixture request');
   return new Response(JSON.stringify(data));};
- const service=createRecordsService({fetchImpl});const first=await service({points});assert.equal(first.status,'needs-parcel');assert.equal(first.parcel,null);assert.equal(first.parcelCandidates.length,2);assert.equal(first.gaps[0].id,'parcel-match');
- const chosen=await service({points,parcelKey:first.parcelCandidates.find(p=>p.id==='A').key});assert.equal(chosen.parcel.id,'A');assert.equal(chosen.status,'partial');assert.ok(chosen.zoningCoverage<.3);assert.ok(chosen.gaps.some(g=>g.id==='zoning-coverage'));
+ const service=createRecordsService({fetchImpl});const first=await service({points});assert.equal(first.status,'partial');assert.equal(first.parcel.members.length,2);assert.equal(first.parcelCandidates.length,2);assert.equal(first.parcel.controlStatus,'unverified');
+ const chosen=await service({points,parcelKey:first.parcelCandidates.find(p=>p.id==='A').key});assert.equal(chosen.parcel.members.length,2);assert.equal(chosen.status,'partial');assert.ok(chosen.zoningCoverage<.3);assert.ok(chosen.gaps.some(g=>g.id==='zoning-coverage'));
 });
 
 test('verified non-government-domain services are restricted to their verified endpoints',()=>{

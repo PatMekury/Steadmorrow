@@ -78,7 +78,7 @@ function pendingAssessment(r){
   if(r.parcel)return [r.narrativeStatus==='researching'?'The property is matched. Checking the housing route…':'The land is matched; housing permission is unresolved',r.narrativeStatus==='researching'?'The parcel and your selected portion are shown above. Gloo is reading the provisions that determine whether new housing can be considered here.':`The mapped record identifies ${r.parcel.address||'this property'}. ${r.codeAccess?.length?'The authority’s code publisher could not be read, so its residential-use conditions remain unknown.':'The retrieved evidence does not yet establish a residential-use route for the selected land.'}`];
   return ['Locating the property and its housing rules',r.narrativeStatus==='researching'?'Gloo is selecting public sources for this location. Verified property evidence will appear here as it arrives.':'The available sources did not establish the property boundary. Return to the map to check the selected land, or retry the public records.'];
 }
-export function renderFindings(container,result,{onParcel,onSimulate,scenario,simulationState,userPriorities}={}){
+export function renderFindings(container,result,{onParcel,onSimulate,onOption,scenario,simulationState,userPriorities}={}){
   const readingSection=container.querySelector('.site-reading[open]')?.dataset.section;
   const focused=document.activeElement?.closest('details')?.dataset.evidenceKey;
   const opened=new Set([...container.querySelectorAll('details[open]')].map(d=>d.dataset.evidenceKey).filter(Boolean));
@@ -87,7 +87,7 @@ export function renderFindings(container,result,{onParcel,onSimulate,scenario,si
   const identity=el('header',undefined,'property-identity');identity.append(el('h3',result.parcel?.address||'Your selected land','property-address'),el('p',[result.locality?.label, result.parcel?`Parcel ${result.parcel.id}`:null].filter(Boolean).join(' · '),'findings-location'));
   container.append(identity);
   const visual=siteView(result);
-  const workspace=createSpatialExperience({result,scenario,simulationState,onSimulate,userPriorities,plan:visual});
+  const workspace=createSpatialExperience({result,scenario,simulationState,onSimulate,onOption,userPriorities,plan:visual});
   container.append(workspace.root);
   const inspector=workspace.inspector;
   const landmark=Object.entries(result.parcel?.attributes??{}).find(([k,v])=>/^landmark$/i.test(k)&&v&&!/^(0|none|no|n)$/i.test(String(v)));

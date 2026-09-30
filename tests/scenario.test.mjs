@@ -41,13 +41,13 @@ test('Gloo selects tools, sees failure, changes a test and must review before ch
   const turns=[()=>call('interpret_priorities',{items:[{label:'Shared outdoor life',meaning:'Leave unallocated land for a shared outdoor place.',original_excerpt:'A place where people can meet outdoors',kind:'goal',target:'land'},{label:'Housing',meaning:'Explore the requested housing study.',original_excerpt:'Housing',kind:'goal',target:'homes',research_topic:'other'}]}),()=>call('read_housing_context',{}),()=>call('test_layout',{...args,width:1}),()=>call('test_layout',args),()=>call('select_layout',{concept_id:selectedId,rationale:'A small cluster leaves land unallocated.',support:[]}),()=>call('review_layout',{concept_id:selectedId}),()=>call('select_layout',{concept_id:selectedId,rationale:'A small cluster leaves land unallocated.',support:[]})];
   const out=turns[requestCount++]();return new Response(JSON.stringify({output:[out]}));
  };
- let active=0;const run=createScenarioAgent({apiKey:'test',model:'test',fetchImpl,resolveContext:()=>entry,reserve:()=>{active++;return ()=>active--;}});
+ let active=0;const run=createScenarioAgent({optionCount:1,apiKey:'test',model:'test',fetchImpl,resolveContext:()=>entry,reserve:()=>{active++;return ()=>active--;}});
  const result=await run({assessmentVersion:'a'.repeat(20)},{onProgress:p=>emitted.push(p.message)});
  assert.equal(result.research.mode,'gloo-tool-agent');assert.equal(result.brief[0].target,'land');assert.ok(observedFailure&&observedResearch);assert.equal(result.concept.metrics.homes,result.concept.buildings.length);assert.equal(active,0);assert.ok(emitted.some(t=>t.includes('Measuring')));
  assert.equal((await run({assessmentVersion:'a'.repeat(20)})).version.scenario,result.version.scenario);assert.equal(requestCount,7);
 });
 test('expired server evidence cannot be replaced with client-supplied findings',async()=>{
- const run=createScenarioAgent({resolveContext:()=>null,reserve:()=>{throw new Error('must not reserve');}});
+ const run=createScenarioAgent({optionCount:1,resolveContext:()=>null,reserve:()=>{throw new Error('must not reserve');}});
  await assert.rejects(run({assessmentVersion:'a'.repeat(20),evidence:evidence()}),/expired/);
 });
 test('invented priority excerpts and premature clarification cannot bypass measured completion',async()=>{
@@ -57,7 +57,7 @@ test('invented priority excerpts and premature clarification cannot bypass measu
   const requests=[['interpret_priorities',{items:[{label:'Keep parking',meaning:'Preserve parking.',original_excerpt:'keep parking',kind:'goal',target:'parking'},{label:'Housing',meaning:'Explore the requested housing study.',original_excerpt:'Housing',kind:'goal',target:'homes',research_topic:'other'}]}],['interpret_priorities',{items:[{label:'A shared garden',meaning:'Leave land for a possible garden.',original_excerpt:'Shared garden',kind:'goal',target:'land'},{label:'Housing',meaning:'Explore the requested housing study.',original_excerpt:'Housing',kind:'goal',target:'homes',research_topic:'other'}]}],['test_layout',args],['ask_priority_question',{question:'Which spacing should I use?'}],['review_layout',()=>({concept_id:id})],['select_layout',()=>({concept_id:id,rationale:'A compact cluster leaves land for the garden idea.',support:[]})]];
   const [name,a]=requests[n++];return new Response(JSON.stringify({output:[{type:'function_call',call_id:'c'+n,name,arguments:JSON.stringify(typeof a==='function'?a():a)}]}));
  };
- const run=createScenarioAgent({apiKey:'test',model:'test',fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}});
+ const run=createScenarioAgent({optionCount:1,apiKey:'test',model:'test',fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}});
  const r=await run({assessmentVersion:'a'.repeat(20)});assert.equal(r.brief[0].originalExcerpt,'Shared garden');assert.ok(errors.some(e=>e.includes('exact excerpt')));assert.ok(errors.some(e=>e.includes('failed geometric test')));
 });
 test('reviewing an alternative does not erase the receipt for a previously reviewed concept',async()=>{
@@ -68,6 +68,6 @@ test('reviewing an alternative does not erase the receipt for a previously revie
   const requests=[['interpret_priorities',{items:[{label:'Housing',meaning:'Explore housing blocks.',original_excerpt:'Housing',kind:'goal',target:'homes'}]}],['test_layout',args],['review_layout',()=>({concept_id:firstId})],['test_layout',{...args,angle:45}],['select_layout',()=>({concept_id:firstId,rationale:'The first arrangement provides the preferred cluster.',support:[]})]];
   const [name,a]=requests[n++];return new Response(JSON.stringify({output:[{type:'function_call',call_id:'c'+n,name,arguments:JSON.stringify(typeof a==='function'?a():a)}]}));
  };
- const run=createScenarioAgent({apiKey:'test',model:'test',fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}});
+ const run=createScenarioAgent({optionCount:1,apiKey:'test',model:'test',fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}});
  const r=await run({assessmentVersion:'a'.repeat(20)});assert.equal(r.concept.id,firstId);assert.equal(n,5);
 });

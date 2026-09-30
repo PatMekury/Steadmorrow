@@ -18,13 +18,13 @@ function model(steps,inspect=()=>{}){let n=0,id;const errors=[];return {errors,g
 test('unresolved housing study can finish without a fabricated layout only after factual receipts are attached',async()=>{
  const {entry,e}=setup();entry.result={housingRoute:'unresolved'};e.priorityMeasurements=[receipt];
  const m=model([['interpret_priorities',{items:[purpose,school]}],['finish_unresolved_study',{}],['answer_priority',{priority_id:'priority-1',measurement_id:receipt.id}],['finish_unresolved_study',{}]]);
- const run=createScenarioAgent({apiKey:'fixture',model:'fixture',fetchImpl:m.fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}});
+ const run=createScenarioAgent({optionCount:1,apiKey:'fixture',model:'fixture',fetchImpl:m.fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}});
  const r=await run({assessmentVersion:'a'.repeat(20)});assert.equal(r.status,'needs-evidence');assert.equal(r.concept,null);assert.equal(r.brief[1].answer.distanceMeters,151);assert(m.errors.some(e=>e.includes('Complete the factual')));
  const cached=await run({assessmentVersion:'a'.repeat(20)});assert.equal(cached.version.scenario,r.version.scenario);assert.equal(m.calls,4);
 });
 test('interrupted housing research can complete factual priorities without a made-up housing layout',async()=>{
  const {entry,e}=setup();entry.result={narrativeStatus:'unavailable'};e.priorityMeasurements=[receipt];const m=model([['interpret_priorities',{items:[purpose,school]}],['answer_priority',{priority_id:'priority-1',measurement_id:receipt.id}],['finish_unresolved_study',{}]]);
- const r=await createScenarioAgent({apiKey:'fixture',model:'fixture',fetchImpl:m.fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}})({assessmentVersion:'a'.repeat(20)});assert.equal(r.status,'needs-evidence');assert.equal(r.concept,null);
+ const r=await createScenarioAgent({optionCount:1,apiKey:'fixture',model:'fixture',fetchImpl:m.fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}})({assessmentVersion:'a'.repeat(20)});assert.equal(r.status,'needs-evidence');assert.equal(r.concept,null);
 });
 
 test('housing purpose cannot be replaced by school question or generic permission request',async()=>{
@@ -36,7 +36,7 @@ test('housing purpose cannot be replaced by school question or generic permissio
     ['answer_priority',{priority_id:'priority-1',measurement_id:receipt.id}],
     ['test_layout',params],['review_layout',id=>({concept_id:id})],['select_layout',id=>({concept_id:id,rationale:'A compact arrangement keeps the housing purpose in view.',support:[]})],
   ]);
-  const run=createScenarioAgent({apiKey:'fixture',model:'fixture',fetchImpl:m.fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}}),r=await run({assessmentVersion:'a'.repeat(20)});
+  const run=createScenarioAgent({optionCount:1,apiKey:'fixture',model:'fixture',fetchImpl:m.fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}}),r=await run({assessmentVersion:'a'.repeat(20)});
   assert.ok(m.errors.some(e=>e.includes('original housing purpose')));assert.ok(m.errors.some(e=>e.includes('already requested')));assert.ok(r.concept);assert.equal(r.brief[0].originalExcerpt,'Affordable housing');assert.equal(r.brief[1].answer.distanceMeters,151);
 });
 
@@ -46,7 +46,7 @@ test('a later concern retains exact earlier free-text excerpts and their measure
     ['interpret_priorities',{items:[purpose,school,{label:'Meet outdoors',meaning:'Keep outdoor gathering in the study.',original_excerpt:refinement,kind:'goal',target:'land',research_topic:'other'}]}],
     ['answer_priority',{priority_id:'priority-1',measurement_id:receipt.id}],['test_layout',params],['review_layout',id=>({concept_id:id})],['select_layout',id=>({concept_id:id,rationale:'A compact arrangement leaves land for gathering.',support:[]})],
   ],(payload,n)=>{if(n===0){const input=JSON.parse(payload.input[0].content);assert.ok(input.originalTexts.includes(schoolText));assert.ok(input.originalTexts.includes(refinement));checked=true;}});
-  const run=createScenarioAgent({apiKey:'fixture',model:'fixture',fetchImpl:m.fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}}),r=await run({assessmentVersion:'a'.repeat(20),refinement});
+  const run=createScenarioAgent({optionCount:1,apiKey:'fixture',model:'fixture',fetchImpl:m.fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}}),r=await run({assessmentVersion:'a'.repeat(20),refinement});
   assert.ok(checked);assert.equal(m.errors.length,0);assert.equal(r.brief[1].answer.id,receipt.id);assert.equal(r.brief[2].originalExcerpt,refinement);
 });
 
@@ -72,6 +72,6 @@ test('an unrelated proximity receipt cannot answer another original question',as
  const {entry,e}=setup();entry.result={housingRoute:'unresolved'};
  const wrong={...receipt,id:'other-route',originalExcerpt:'How far is the park?'};e.priorityMeasurements=[wrong,receipt];
  const m=model([['interpret_priorities',{items:[purpose,school]}],['answer_priority',{priority_id:'priority-1',measurement_id:wrong.id}],['answer_priority',{priority_id:'priority-1',measurement_id:receipt.id}],['finish_unresolved_study',{}]]);
- const result=await createScenarioAgent({apiKey:'fixture',model:'fixture',fetchImpl:m.fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}})({assessmentVersion:'a'.repeat(20)});
+ const result=await createScenarioAgent({optionCount:1,apiKey:'fixture',model:'fixture',fetchImpl:m.fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}})({assessmentVersion:'a'.repeat(20)});
  assert(m.errors.some(e=>e.includes('exact original priority')));assert.equal(result.brief[1].answer.id,receipt.id);
 });

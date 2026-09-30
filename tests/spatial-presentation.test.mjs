@@ -6,7 +6,7 @@ const noFit={status:'no-fit',buildings:[],parameters:{width:6,depth:9,storeys:3,
 test('failed layout leaves land empty without a ghost building or capacity verdict',()=>{
  const saved=JSON.stringify({result,noFit}),p=scenePresentation(result,noFit);
  assert.deepEqual(p,{placed:false,probe:null,height:null,homes:null,parking:null});
- assert.equal(sceneOutcome(result,{concept:noFit}),'This arrangement of homes does not fit the land you selected.');
+ assert.equal(sceneOutcome(result,{concept:noFit}),'The bounded search did not find a placement for this option. Other arrangements remain possible.');
  assert.equal(JSON.stringify({result,noFit}),saved);
 });
 test('placed concepts preserve their measured quantities without implying permission',()=>{

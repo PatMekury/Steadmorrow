@@ -72,7 +72,7 @@ export function priorityValue(item,{result,scenario,simulationState={}}){
   if(item.target==='homes'){
     const count=scenario?.concept?.metrics?.homes;
     if(canDrawHousing(result,scenario)&&Number.isSafeInteger(count)&&count>0)return `${number(count)} ${count===1?'home':'homes'} drawn`;
-    if(scenario?.concept?.status==='no-fit')return 'No fit yet';
+    if(scenario?.concept?.status==='no-fit')return 'Placement unresolved';
   }
   return 'For discussion';
 }
@@ -91,14 +91,16 @@ export function housingRetrievalIncomplete(result){
 }
 export function sceneOutcome(result,scenario){
   if(housingRetrievalIncomplete(result))return 'The housing rules could not be retrieved, so a housing layout has not been tested.';
+  const option=scenario?.options?.find(o=>o.id===scenario.activeOptionId);
+  if(option?.useStatus==='unresolved')return option.applicability;
   if(scenario?.status==='needs-evidence'&&scenario.assessmentVersion===result.version?.assessment)return 'The housing approval path for this site is still unresolved; no housing layout is proposed.';
-  if(result.status==='needs-parcel')return 'Choose the property you want to explore.';
+  if(result.status==='needs-parcel')return 'The mapped property records conflict; confirm which boundary is correct.';
   const assessedVersion=scenario?.assessmentVersion??scenario?.version?.assessment;
   if(assessedVersion&&result.version?.assessment&&assessedVersion!==result.version.assessment)return 'This idea needs a new check against the updated findings.';
   if(scenario?.concept?.contextVersion&&result.siteContext?.geometryVersion&&scenario.concept.contextVersion!==result.siteContext.geometryVersion)return 'This idea needs a new check against the updated site.';
   if(scenario?.concept?.buildings?.length&&!canDrawHousing(result,scenario))return 'Housing-use permission is unresolved, so no housing is shown.';
   if(scenario?.concept?.buildings?.length)return `This study places ${scenario.concept.metrics.homes} homes on the selected land; permission to build is not established.`;
-  if(scenario?.concept?.status==='no-fit')return 'This arrangement of homes does not fit the land you selected.';
+  if(scenario?.concept?.status==='no-fit'){const c=scenario.concept,d=c.diagnostics;if(d?.testedFootprintWidthMeters)return `No placement found for the tested ${number(d.testedFootprintWidthMeters)} × ${number(d.testedFootprintDepthMeters)} m ${c.typology==='attached'?'whole row':'building'}, with ${number(c.parameters.edge_clearance)} m of assumed edge clearance. This bounded search does not rule out a different layout.`;return 'The bounded search did not find a placement for this option. Other arrangements remain possible.';}
   if(result.narrativeStatus==='researching')return 'Checking what this land could make possible.';
   if(result.housingRoute==='supported')return 'The rules suggest housing may be possible here; the site still needs checking.';
   return 'We cannot yet tell whether new housing is allowed on this land.';
@@ -121,6 +123,7 @@ function saveBrief(result,scenario,svg,studyError){
   if(studyError&&!scenario?.concept)article.append(el('p','The housing study did not finish. The image shows the selected land and mapped surroundings; no housing arrangement has been selected.'));
 
   if(scenario?.concept&&(canDrawHousing(result,scenario)||!scenario.concept.buildings.length)){const c=scenario.concept;article.append(el('h2','Illustrative layout'),el('p',`${c.metrics.homes} homes drawn; ${c.metrics.parking} parking bays drawn; ${c.buildings.length?number(c.metrics.heightMeters)+' m assumed model height':'no building height established'}. Legal capacity and affordable delivery are not established.`),el('p',scenario.rationale),el('p',conceptSummary(c)));for(const a of c.assumptions)article.append(el('p',a));}
+  if(scenario?.options?.length){article.append(el('h2','Housing options'));for(const o of scenario.options)article.append(el('h3',o.title),el('p',o.dimensionBasis),el('p',o.applicability),el('p',o.concept?conceptSummary(o.concept):'Housing use remains unresolved.'));}
   if(scenario?.brief?.length){article.append(el('h2','What matters to you'));for(const priority of scenario.brief){article.append(el('h3',priority.originalExcerpt||priority.label));const answer=currentRouteAnswer(priority.answer);if(answer){const measured=answer.measurement??answer;article.append(el('p',measured.headline||priority.meaning),el('p',measured.detail||''));if(measured.feature?.sourceUrl){const a=el('a','Map source');a.href=measured.feature.sourceUrl;article.append(a);}if(measured.route?.sourceUrl){const a=el('a','Street route · Valhalla / OpenStreetMap');a.href=measured.route.sourceUrl;article.append(a);}}else article.append(el('p',priority.meaning));}}
   const mappedContext=sceneContext(result,scenario);if(mappedContext?.attribution||usesOvertureContext(mappedContext)){article.append(el('p',heightExplanation));const attribution=el('p');appendContextAttribution(attribution,mappedContext);for(const a of attribution.querySelectorAll('a'))a.style.marginRight='16px';article.append(attribution);}
   if(result.obstacles?.[0])article.append(el('h2','Next conversation'),el('p',result.obstacles[0].consequence),el('p',result.obstacles[0].nextStep));
@@ -132,14 +135,27 @@ function saveBrief(result,scenario,svg,studyError){
   article.append(el('small',`Evidence ${scenario?.version?.evidence??result.version?.evidence} · Assessment ${result.version?.assessment} · Scenario ${scenario?.version?.scenario??'none'}`));body.append(article);
   const blob=new Blob(['<!doctype html>\n'+doc.documentElement.outerHTML],{type:'text/html;charset=utf-8'}),url=URL.createObjectURL(blob),a=el('a');a.href=url;a.download='Steadmorrow-discussion-brief.html';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
-export function createSpatialExperience({result,scenario,simulationState={},userPriorities={},onSimulate,plan}){
+export function createSpatialExperience({result,scenario,simulationState={},userPriorities={},onSimulate,onOption,plan}){
   const root=el('div',undefined,'site-workspace');
   const left=el('aside',undefined,'priority-dashboard'),stage=el('section',undefined,'site-exploration'),inspector=el('aside',undefined,'site-inspector');
   left.setAttribute('aria-label','Your priorities');stage.setAttribute('aria-label','Your land in three dimensions');inspector.setAttribute('aria-label','What the findings mean');root.append(left,stage,inspector);
   const concept=scenario?.concept,presentation=scenePresentation(result,concept,scenario),context=sceneContext(result,scenario);
   const top=el('header',undefined,'scene-heading');top.append(el('h3','Your land, in context'));
   const mode=el('div',undefined,'scene-view-switch');mode.setAttribute('role','group');mode.setAttribute('aria-label','Scene view');top.append(mode);stage.append(top);
-  const surface=el('div',undefined,'site-surface');stage.append(surface);
+  const options=scenario?.options??[];let optionDetail;
+  if(options.length){
+    const tabs=el('div',undefined,'housing-options');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Housing options');
+    const activeId=scenario.activeOptionId??options[0].id;
+    for(const [i,option] of options.entries()){
+      const tab=button('',()=>onOption?.(option.id),'housing-option');tab.id='housing-tab-'+option.id;tab.setAttribute('role','tab');tab.setAttribute('aria-controls','housing-option-panel');tab.setAttribute('aria-selected',String(option.id===activeId));tab.tabIndex=option.id===activeId?0:-1;
+      tab.append(el('span',String(i+1).padStart(2,'0'),'option-number'),el('span',option.title),el('small',option.useStatus==='unresolved'?'Use unresolved':option.concept?.buildings?.length?'Illustrative arrangement':'Placement unresolved'));
+      tab.addEventListener('keydown',event=>{const keys=['ArrowLeft','ArrowRight','Home','End'];if(!keys.includes(event.key))return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?options.length-1:(i+(event.key==='ArrowLeft'?-1:1)+options.length)%options.length;onOption?.(options[next].id);});tabs.append(tab);
+    }
+    stage.append(tabs);
+    const option=options.find(o=>o.id===activeId),detail=el('details',undefined,'housing-option-detail');detail.append(el('summary','Why this option · housing-use conditions'));optionDetail=detail;
+    detail.append(el('p',option?.dimensionBasis),el('p',option?.applicability,'option-qualification'));sourceLinks(detail,option?.support,scenario?.sources??result.sources);
+  }
+  const surface=el('div',undefined,'site-surface');if(options.length){surface.id='housing-option-panel';surface.setAttribute('role','tabpanel');surface.setAttribute('aria-labelledby','housing-tab-'+(scenario.activeOptionId??options[0].id));}stage.append(surface);
   const canvasKey=JSON.stringify(result.selectedArea?.geometry??[]);
   if(!retainedScene||retainedScene.key!==canvasKey){retainedScene?.view?.dispose();retainedScene={key:canvasKey,host:el('div',undefined,'site-canvas'),view:null,mode:'3d',onViewChange:null,onSelectFeature:null};}
   const retained=retainedScene;surface.append(retained.host);
@@ -159,7 +175,7 @@ export function createSpatialExperience({result,scenario,simulationState={},user
   const positions=[];
   const addCallout=(label,target,body,tone='normal',action)=>{
     const b=button('',()=>action?action(b):reveal(b,target,label,body),'site-callout '+tone);b.setAttribute('aria-expanded','false');b.setAttribute('aria-label',label);b.title=label;
-    const index=positions.length+1;b.append(el('span',String(index),'callout-number'),el('span',label,'callout-label'));if(!positions.length)b.classList.add('primary-marker');
+    const index=positions.length+1;b.append(el('span',String(index),'callout-number'),el('span',label,'callout-label'));
     callouts.append(b);positions.push({b,target});return b;
   };
   const updateAnchors=()=>{
@@ -203,20 +219,20 @@ export function createSpatialExperience({result,scenario,simulationState={},user
   const three=button('3D',()=>{retained.mode='3d';retained.view?.setView('3d');three.setAttribute('aria-pressed','true');two.setAttribute('aria-pressed','false');}),two=button('Plan',()=>{retained.mode='plan';retained.view?.setView('plan');two.setAttribute('aria-pressed','true');three.setAttribute('aria-pressed','false');});three.setAttribute('aria-pressed',String(retained.mode==='3d'));two.setAttribute('aria-pressed',String(retained.mode==='plan'));mode.append(three,two);
   const controls=el('div',undefined,'site-camera-controls');controls.append(button('↺',()=>retained.view?.rotate(),'camera-control'),button('Focus land',()=>retained.view?.focus('selection'),'camera-control'),button('Neighbourhood',()=>retained.view?.focus('context'),'camera-control'));controls.firstChild.setAttribute('aria-label','Rotate the site');surface.append(controls);
   const caption=el('div',undefined,'site-scene-caption');caption.append(el('span','Selected land','key-selection'),el('span','Mapped property','key-parcel'),el('span','Existing buildings','key-existing'));stage.append(caption);
-  const heightNote=el('details',undefined,'scene-height-note');heightNote.append(el('summary','About the map and building heights'),el('p',heightExplanation),el('p','Streets follow mapped paths. Widths use mapped measurements where available, otherwise approximate widths based on lanes or road type. They are not surveyed road boundaries.'));stage.append(heightNote);
+  const heightNote=el('details',undefined,'scene-height-note');heightNote.append(el('summary','About the map and building heights'),el('p',heightExplanation),el('p','Proposed façades and roof details are illustrative architectural treatment, not surveyed elevations or an interior design.'),el('p','Streets follow mapped paths. Widths use mapped measurements where available, otherwise approximate widths based on lanes or road type. They are not surveyed road boundaries.'));stage.append(heightNote);
+  if(optionDetail)stage.append(optionDetail);
   const outcome=el('p',sceneOutcome(result,scenario),'site-outcome');outcome.setAttribute('role','status');stage.insertBefore(outcome,caption);
   if(simulationState.error){const error=el('p',simulationState.error,'scene-error');error.setAttribute('role','alert');stage.append(error,button('Try the study again',()=>onSimulate?.(''),'site-text-button'));}
   appendContextAttribution(stage,context,'scene-attribution');
   if(context?.status==='unavailable')stage.append(el('p','Nearby building shapes could not be loaded.','scene-context-note'));
   else if(context?.status==='partial')heightNote.append(el('p','The map may omit nearby buildings or building parts.'));
   const landmark=Object.entries(result.parcel?.attributes??{}).find(([k,v])=>/^landmark$/i.test(k)&&v&&!/^(0|none|no|n)$/i.test(String(v)));
-  addCallout('Selected land','selection',`You selected approximately ${number(Math.round(result.selectedArea?.squareMeters??0))} m².`+(result.parcel?.geometry?' The subdued outline is the separately retrieved property boundary.':' The property boundary is still being checked.'));
-  if(concept?.status==='no-fit'){
-    const d=concept.diagnostics??{},p=concept.parameters;
-    addCallout('Why this test does not fit',concept.blockedRegions?.[0]?.id??'selection',d.explanation||`${concept.metrics.mappedExistingFootprintSquareMeters>0?'Mapped buildings cover '+number(Math.round(concept.metrics.mappedExistingFootprintSquareMeters))+' m² of the area tested. ':''}This test used a ${number(d.testedFootprintWidthMeters??p.width)} × ${number(d.testedFootprintDepthMeters??p.depth)} m ${concept.typology==='apartment'?'apartment footprint':concept.typology==='attached'?'row of homes':'home footprint'}, plus space around it. It could not place this arrangement inside the selected land. This does not rule out every design.`,'constraint');
-  }else if(presentation.placed&&concept?.parking?.length)addCallout('Parking in this idea','parking',`${concept.parking.length} spaces are drawn. A usable driveway connection and the required parking still need checking.`);
-  if(concept?.status!=='no-fit'&&concept?.blockedRegions?.length){const blocked=concept.blockedRegions[0];addCallout('Existing building',blocked.id,'A mapped building footprint overlaps this selected land. The study keeps that building in place and excludes its footprint from new housing.','constraint');}
-  if(landmark&&positions.length<3)addCallout('Landmark protection','property','The property record lists a landmark designation. Its effect on new building within the selected land has not been established.','constraint');
+  const askedTargets=new Set((simulationState.brief??scenario?.brief??[]).map(p=>p.target));
+  if(presentation.placed&&concept?.parking?.length&&!askedTargets.has('parking'))addCallout('Driveway access to check','parking','Parking spaces are shown here, but a connection to the public road has not been established. A site review needs to check that connection.','constraint');
+  if(concept?.blockedRegions?.length&&!askedTargets.has('land')){const blocked=concept.blockedRegions[0];addCallout('Existing building',blocked.id,'A mapped building footprint overlaps this selected land. The study keeps that building in place and excludes its footprint from new housing.','constraint');}
+  if(landmark&&positions.length<3&&!askedTargets.has('land'))addCallout('Landmark protection','property','The property record lists a landmark designation. Its effect on new building within the selected land has not been established.','constraint');
+
+  if(result.parcel?.members?.length>1&&positions.length<3&&!askedTargets.has('land'))addCallout('Separate property rights','property',`Your selection includes ${result.parcel.members.length} mapped parcels. This study retains each boundary. Common ownership and any consolidation needed for development remain unverified.`,'constraint');
 
   left.append(el('h3','What matters to you'));
   const brief=simulationState.brief??scenario?.brief;
@@ -239,8 +255,9 @@ export function createSpatialExperience({result,scenario,simulationState={},user
       const url=answer?.feature?.sourceUrl??answer?.sourceUrl??measurement?.feature?.sourceUrl??measurement?.sourceUrl;if(url){const a=el('a','View the source ↗');a.href=url;a.target='_blank';a.rel='noopener noreferrer';detailHost.append(a);}
     });};
     const b=button('',()=>showPriority(b),'priority-tile');b.setAttribute('aria-expanded','false');b.dataset.answerState=answer?.status==='partial'?'partial':distance!==null||answer?.status==='answered'?'answered':'pending';b.append(el('span',label,'priority-title'),el('strong',value,'priority-answer'),el('span','+','priority-open'));left.append(b);
-    if(measurement?.feature?.id&&positions.length<6)addCallout(distance!==null?`${(measurement.mode??'walking').replace(/^./,c=>c.toUpperCase())} route`:label,measurement.feature.id,'','priority',showPriority);
+
   }
+  if(!options.length&&result.version?.assessment&&result.parcel&&!simulationState.busy&&result.narrativeStatus!=='researching')stage.append(button('Compare three housing options',()=>onSimulate?.(''),'site-text-button'));
   const canRefine=Boolean(result.version?.assessment&&result.parcel&&result.status!=='needs-parcel'&&!result.locality?.boundaryUncertain&&!result.locality?.authorityUnresolved&&!simulationState.busy);
   const add=button('Add a concern +',()=>{form.hidden=!form.hidden;if(!form.hidden)input.focus();},'add-concern');add.disabled=!canRefine;left.append(add);
   const form=el('form',undefined,'priority-refine');form.hidden=!simulationState.question;

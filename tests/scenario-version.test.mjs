@@ -43,7 +43,7 @@ for(const changed of ['source evidence','context geometry'])test(`late ${changed
     }else throw new Error('Unexpected retry loop');
     return new Response(JSON.stringify({output:[selected]}));
   };
-  const run=createScenarioAgent({apiKey:'fixture',model:'fixture',fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{},onDiagnostic:event=>diagnostics.push(event)});
+  const run=createScenarioAgent({optionCount:1,apiKey:'fixture',model:'fixture',fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{},onDiagnostic:event=>diagnostics.push(event)});
   const result=await run({assessmentVersion:'a'.repeat(20)});
   assert.equal(calls,16);assert.ok(invalidatedNotice);assert.equal(result.concept.evidenceVersion,evidence.caseId);assert.equal(result.concept.contextVersion,evidence.siteContext.geometryVersion);
   assert.deepEqual(diagnostics.find(d=>d.type==='scenario-concepts-invalidated')?.conceptIds,[...oldIds]);

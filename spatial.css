@@ -37,3 +37,19 @@ html.findings-active .land-inner{max-width:1520px}.findings-step{max-width:none}
 @media(min-width:1021px){.site-surface{height:clamp(500px,calc(100svh - 275px),700px)}}
 @media(max-width:640px){[data-step="findings"] .land-intro h2{flex-basis:100%;order:3;margin:0}.findings-step .property-address{font-size:26px;line-height:32px}}
 @media print{.work-banner,.priority-refine,.add-concern,.site-camera-controls,.scene-view-switch,.site-popover,.source-actions,.site-text-button,.save-discussion{display:none!important}.site-workspace{display:block}.site-surface{height:380px;break-inside:avoid}.priority-dashboard{display:flex;gap:24px}.priority-tile{border:0}.site-inspector{margin:24px 0}.site-reading{display:none!important}.scene-height-note summary{display:none}.scene-height-note>p{display:block!important}.site-scene-caption{print-color-adjust:exact}}
+
+/* Comparison and progress stay within the same calm architectural workspace. */
+.findings-step .work-banner{position:sticky;top:0;z-index:40;box-shadow:0 8px 24px #132f2012}
+.housing-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border-bottom:1px solid #ccd5ce;margin:8px 0 0}
+.housing-option{background:transparent;border:0;border-bottom:3px solid transparent;padding:14px 12px 15px;text-align:left;display:flex;flex-direction:column;gap:6px;font:500 17px/22px Outfit,sans-serif;color:#636363;min-height:104px}
+.housing-option[aria-selected=true]{border-color:#166c3d;color:#0e0e0e;background:#edf4ee}
+.housing-option:hover{background:#f0f3ef}.housing-option:focus-visible{outline:2px solid #166c3d;outline-offset:-3px}
+.option-number{font:400 13px/18px Outfit,sans-serif;letter-spacing:.08em;color:#166c3d}
+.housing-option small{font:400 13px/17px Outfit,sans-serif;color:#636363}
+.housing-option-detail{padding:15px 2px 17px;min-height:120px}.housing-option-detail p{font:400 16px/23px Outfit,sans-serif;margin:0 0 7px}
+.housing-option-detail .option-qualification{font-size:14px;line-height:21px;color:#636363}
+@media(max-width:640px){.housing-option{font-size:15px;line-height:20px;padding:12px 8px}.housing-option small{font-size:12px}.housing-option-detail{min-height:0}.housing-option-detail p{font-size:15px;line-height:22px}}
+
+.housing-options{margin-bottom:16px}.housing-option-detail{min-height:0;margin:10px 0 0;padding:0;color:#555}
+.housing-option-detail summary{font:400 16px/24px Outfit,sans-serif;padding:12px 0;cursor:pointer;color:#166c3d}
+.housing-option-detail p{margin:10px 0}.housing-option-detail .spatial-source summary{font-size:15px}

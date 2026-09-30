@@ -17,6 +17,7 @@ export async function mergeStudyEvidence(input,result,scenario){
   const geometry=scenario.concept?.contextVersion??scenario.contextVersion??null;
   if(geometry!==(result.siteContext?.geometryVersion??null)||(scenario.siteContext?.geometryVersion??null)!==geometry)return result;
   if(scenario.concept&&scenario.concept.evidenceVersion!==expected)return result;
+  if((scenario.options??[]).some(o=>o.concept&&(o.concept.evidenceVersion!==expected||(o.concept.contextVersion??null)!==geometry)))return result;
   const sources=scenario.sources;
   if(new Set(sources.map(s=>s.id)).size!==sources.length||sources.some(s=>!s.id||!s.url||!s.hash))return result;
   if((result.sources??[]).some(s=>!sources.some(n=>n.id===s.id&&n.url===s.url&&n.hash===s.hash)))return result;
@@ -30,8 +31,11 @@ export async function mergeStudyEvidence(input,result,scenario){
 export function matchingSavedScenario(result,scenario){
   const version=result?.version?.assessment;
   if(!assessmentVersion(version)||scenario?.assessmentVersion!==version)return null;
+  if((scenario.options??[]).some(o=>o.concept&&(o.concept.evidenceVersion!==(result.caseId??result.version?.evidence)||(o.concept.contextVersion??null)!==(result.siteContext?.geometryVersion??null))))return null;
+  if(scenario.options?.length&&(!scenario.options.some(o=>o.id===scenario.activeOptionId)&&scenario.activeOptionId))return null;
   if(scenario.status==='needs-evidence'&&!scenario.concept)return scenario.version?.assessment===version&&scenario.version?.evidence===(result.caseId??result.version?.evidence)&&(scenario.contextVersion??null)===(result.siteContext?.geometryVersion??null)?scenario:null;
   if(!scenario.concept)return null;
+  if(scenario.concept.status==='no-fit'&&scenario.concept.method&&!scenario.concept.method.includes('translated-v4'))return null;
   if(scenario.version?.assessment!==version||scenario.concept.evidenceVersion!==(result.caseId??result.version?.evidence))return null;
   if((scenario.concept.contextVersion??null)!==(result.siteContext?.geometryVersion??null))return null;
   return scenario;
@@ -83,4 +87,10 @@ export function savedFindingsMessage(saved){
   const retrievalIncomplete=!saved.lastFindings.result.code?.length&&(saved.lastFindings.result.codeAccess?.length||(saved.lastFindings.result.retrievalFailures??[]).some(f=>/planning|code|publication|website/i.test(f.name??'')));
   const detail=retrievalIncomplete?'Housing rules could not be retrieved; the housing check is incomplete.':saved.interrupted?'Research did not finish.':complete?(saved.simulationState.error?'The housing study did not finish.':''):'Some housing checks remain unresolved.';
   return `Saved findings from ${time}. ${detail?detail+' ':''}Retry findings to run a new check.`;
+}
+
+export function activateHousingOption(scenario,id){
+  const option=scenario?.options?.find(o=>o.id===id);if(!option)return scenario;
+  return {...scenario,activeOptionId:id,concept:option.concept??null,status:option.concept?.status??'needs-evidence',
+    rationale:option.dimensionBasis,support:option.support,contextVersion:scenario.siteContext?.geometryVersion??null};
 }

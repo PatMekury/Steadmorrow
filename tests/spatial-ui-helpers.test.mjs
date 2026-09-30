@@ -94,6 +94,6 @@ test('housing priority shows only current eligible calculated homes and preserve
     assert.equal(priorityValue(priority,{result,scenario:changed}),'For discussion');
   }
   assert.equal(priorityValue(priority,{result:{...result,housingRoute:'unresolved'},scenario}),'For discussion');
-  assert.equal(priorityValue(priority,{result,scenario:{concept:{status:'no-fit',buildings:[],metrics:{homes:0}}}}),'No fit yet');
+  assert.equal(priorityValue(priority,{result,scenario:{concept:{status:'no-fit',buildings:[],metrics:{homes:0}}}}),'Placement unresolved');
   assert.match(sceneOutcome(result,{...scenario,assessmentVersion:'old'}),/updated findings/);
 });

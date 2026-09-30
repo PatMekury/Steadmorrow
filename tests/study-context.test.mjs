@@ -16,7 +16,7 @@ test('unchanged reviews cannot grow the conversation; evidence changes reopen re
  let executions=0,requests=0;
  const session={snapshot:()=>structuredClone(evidence),context:()=>structuredClone(evidence),toolDefinitions:()=>[{type:'function',function:{name:'review_evidence'}}],execute:async()=>{executions++;return structuredClone(evidence);}};
  const entry={session,input:{priorities:{purpose:'affordable housing',matters:'nearest police station',choices:[]}},result:{housingRoute:'supported',assessment:{summary:'A qualified development path.'},housingAnalysis:{siteLimits:'Recorded restrictions remain unverified.'}}};
- const run=createScenarioAgent({apiKey:'fixture',model:'fixture',resolveContext:()=>entry,reserve:()=>()=>{},fetchImpl:async(_url,options)=>{
+ const run=createScenarioAgent({optionCount:1,apiKey:'fixture',model:'fixture',resolveContext:()=>entry,reserve:()=>()=>{},fetchImpl:async(_url,options)=>{
   const payload=JSON.parse(options.body),state=JSON.parse(payload.input[0].content);
   assert.equal(state.completedAssessment.housingAnalysis.siteLimits,'Recorded restrictions remain unverified.');
   assert.equal(state.originalTexts[0],'affordable housing');
@@ -29,8 +29,8 @@ test('unchanged reviews cannot grow the conversation; evidence changes reopen re
   if(requests===9){assert.equal(state.propertyEvidence.sources[0].passages[0].text,'Changed qualified source.');throw new Error('fixture finished');}
   const first=requests===0;requests++;return new Response(JSON.stringify({status:'completed',output:[{type:'function_call',call_id:'call-'+requests,name:first?'interpret_priorities':'review_evidence',arguments:first?JSON.stringify({items:[{label:'Housing',meaning:'Explore housing',original_excerpt:'affordable housing',kind:'goal',target:'homes'}]}):'{}'}]}));
  }});
- await assert.rejects(run({assessmentVersion:'a'.repeat(20)}),/fixture finished/);
- assert.equal(executions,2);assert.equal(evidence.priorityMeasurements[0].route.streets[0].geometry.length,20000);
+ await assert.rejects(run({assessmentVersion:'a'.repeat(20)}),/repeated validation failures/);
+ assert.equal(executions,1);assert.equal(evidence.priorityMeasurements[0].route.streets[0].geometry.length,20000);
 });
 
 test('typed upstream diagnostics retain status/code/trace without leaking arbitrary provider text',async()=>{
@@ -46,7 +46,7 @@ test('completed assessment handoff retires duplicate discovery but keeps targete
  const names=['read_planning_guidance','review_evidence','read_site_context','search_code_sections'];
  const session={snapshot:()=>evidence,context:()=>evidence,toolDefinitions:()=>names.map(name=>({type:'function',function:{name,parameters:{properties:name==='search_code_sections'?{query:{type:'string'}}:{}}}}))};
  const entry={session,input:{priorities:{purpose:'Housing',matters:'',choices:[]}},result:{narrativeStatus:'ready',housingRoute:'supported',housingAnalysis:{siteLimits:'Access remains unverified.'}}};let n=0;
- const run=createScenarioAgent({resolveContext:()=>entry,reserve:()=>()=>{},fetchImpl:async(_url,options)=>{
+ const run=createScenarioAgent({optionCount:1,resolveContext:()=>entry,reserve:()=>()=>{},fetchImpl:async(_url,options)=>{
   const payload=JSON.parse(options.body),offered=payload.tools.map(t=>t.function.name);
   if(n++===0){assert.deepEqual(offered,['interpret_priorities']);return new Response(JSON.stringify({output:[{type:'function_call',call_id:'one',name:'interpret_priorities',arguments:JSON.stringify({items:[{label:'Housing',meaning:'Explore housing',original_excerpt:'Housing',kind:'goal',target:'homes'}]})}]}));}
   assert.ok(offered.includes('test_layout'));assert.ok(offered.includes('search_code_sections'));

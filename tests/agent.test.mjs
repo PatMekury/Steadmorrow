@@ -33,7 +33,7 @@ test('research sessions perform no scripted retrieval before the model chooses a
 test('tool inputs reject location substitution, arbitrary network targets and overlong searches',()=>{
  for(const [name,args] of [['resolve_location',{points:[]}],['read_map_source',{source_id:'ok',url:'https://evil.example'}],['search_code_sections',{query:'x'.repeat(121)}],['read_code_sections',{section_ids:[]}],['shell',{}]])assert.throws(()=>validateToolArguments(name,args));
 });
-test('agent-selected map sources are queried against the original outline and multiple parcels require human choice',async()=>{
+test('agent-selected map sources are queried against the original outline and adjacent parcels retain individual records in one study',async()=>{
  let query;
  const read=async target=>{
   const u=new URL(target);
@@ -44,7 +44,7 @@ test('agent-selected map sources are queried against the original outline and mu
  };
  const session=createResearchSession(input,{read});await session.execute('resolve_location');const discovery=await session.execute('discover_map_sources',{kind:'parcel'});
  await assert.rejects(session.execute('read_map_source',{source_id:'made-up-source'}));
- const found=await session.execute('read_map_source',{source_id:discovery.sources[0].source_id});assert.equal(found.status,'needs-user-choice');assert.equal(session.snapshot().status,'needs-parcel');assert.equal(session.snapshot().parcel,null);
+ const found=await session.execute('read_map_source',{source_id:discovery.sources[0].source_id});assert.equal(found.status,'matched');assert.notEqual(session.snapshot().status,'needs-parcel');assert.equal(session.snapshot().parcel.members.length,2);assert.equal(session.snapshot().parcel.controlStatus,'unverified');assert.ok(session.snapshot().gaps.some(g=>g.id==='parcel-control'));
  assert.deepEqual(query.rings[0].slice(0,4),input.points.map(p=>[p.lng,p.lat]));
 });
 

@@ -1,3 +1,4 @@
+import {activateHousingOption} from './findings-session.js';
 import { privateInputFields, hasPrivateInput, screenedLandSave, privacyMessage, addressPrivacyMessage } from './input-privacy.js';
 import { validatePolygon, areaSquareMeters, polygonCenter } from './geometry.js';
 import { renderFindings } from './findings.js';
@@ -639,7 +640,7 @@ async function simulateFindings(refinement='') {
 }
 function displayFindings(result, progressive=false) {
   if(progressive&&result.sources?.length)$('findings-step').setAttribute('aria-busy','false');
-  renderFindings($('findings-content'), result, {userPriorities:findingsInput().priorities,onSimulate:simulateFindings,scenario:scenarioResult?.assessmentVersion===result.version?.assessment?scenarioResult:null,simulationState,onParcel: key => {
+  renderFindings($('findings-content'), result, {userPriorities:findingsInput().priorities,onSimulate:simulateFindings,scenario:scenarioResult?.assessmentVersion===result.version?.assessment?scenarioResult:null,simulationState,onOption:id=>{scenarioResult=activateHousingOption(scenarioResult,id);displayFindings(lastFindings.result);requestAnimationFrame(()=>document.getElementById('housing-tab-'+id)?.focus({preventScroll:true}));},onParcel: key => {
     parcelKey = key; parcelShape = JSON.stringify(points); lastFindings = null;
     scenarioResult=null;
     void showFindings();

@@ -104,6 +104,6 @@ test('school question cannot be completed by interpretation: Gloo must attach an
     if(n===3)assert.ok(!b.tools.some(t=>t.function.name==='select_layout'),'Selection must be withheld while a factual question has no attached receipt');
     if(n===8)assert.ok(b.tools.some(t=>t.function.name==='select_layout'),'Selection should become available after the receipt is attached and layout reviewed');
     const [name,args]=steps[n++];return new Response(JSON.stringify({output:[{type:'function_call',call_id:'c'+n,name,arguments:JSON.stringify(typeof args==='function'?args():args)}]}));};
-  const run=createScenarioAgent({apiKey:'fixture',model:'fixture',fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}}),result=await run({assessmentVersion:'a'.repeat(20)});
+  const run=createScenarioAgent({optionCount:1,apiKey:'fixture',model:'fixture',fetchImpl,resolveContext:()=>entry,reserve:()=>()=>{}}),result=await run({assessmentVersion:'a'.repeat(20)});
   assert.ok(errors.some(e=>e.includes('factual priorities')));assert.ok(errors.some(e=>e.includes('measurement ID')));assert.equal(result.brief[0].answer.distanceMeters,100);assert.equal(result.brief[0].answer.feature.name,'Near School');
 });

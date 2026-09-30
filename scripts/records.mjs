@@ -1,3 +1,4 @@
+import {parcelStudy} from './parcel-study.mjs';
 import {isPrivateRecordField} from '../input-privacy.js';
 import {boundaryLocation} from './boundary-location.mjs';
 import { load } from 'cheerio';
@@ -360,9 +361,8 @@ export function createRecordsService({fetchImpl=fetch,now=Date.now,timeoutMs}={}
       if(parcels) {
         result.sources.push(parcels.evidence);
         result.parcelCandidates=parcels.records.slice(0,20);
-        if(input.parcelKey){result.parcel=parcels.records.find(p=>p.key===input.parcelKey)??null;if(!result.parcel)gap('selection','The previous parcel match is no longer available','Records or the selected area changed.','Choose a parcel from the current results.');}
-        else if(parcels.records.length===1)result.parcel=parcels.records[0];
-        if(!result.parcel){result.status='needs-parcel';gap('parcel-match','More than one parcel intersects your selection','Select the parcel to research. Their development capacity has not been combined.','Choose a parcel below or adjust the outline.');}
+        const collection=parcelStudy(parcels.records,selected,input.parcelKey);result.parcel=collection.parcel;
+        if(!result.parcel){result.status='needs-parcel';gap('parcel-match','The mapped records overlap or conflict','Confirm the correct property record. Adjacent parcels can be studied together without combining their legal rights.','Choose the correct overlapping record below.');}
       } else gap('parcel',parcelLookupStatus==='source-error'?'The parcel source could not be reached':'A reliable parcel match was not found',parcelLookupStatus==='source-error'?'The connected parcel lookup failed. This is a source failure, not evidence that no parcel exists.':parcelLookupStatus==='unsupported-record-format'?'A public layer was found, but its parcel identifier could not be interpreted reliably. The record format needs adapter support.':parcelLookupStatus==='no-match'?'The queried public layers did not return a usable parcel polygon intersecting this outline. The blue outline remains an exploration area.':'No supported authoritative parcel layer was discovered for this selection. A local record may still exist outside the connected sources.','Retry the lookup, check the outline, or obtain the parcel record from the local assessor.');
       result.checks.push({name:'Parcel',status:result.parcel?'retrieved':parcels?'needs-review':parcelLookupStatus});
       const target=result.parcel?.geometry??selected;
