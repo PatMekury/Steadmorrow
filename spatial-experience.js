@@ -150,7 +150,12 @@ export function createSpatialExperience({result,scenario,simulationState={},user
     const activeId=scenario.activeOptionId??options[0].id;
     for(const [i,option] of options.entries()){
       const tab=button('',()=>onOption?.(option.id),'housing-option');tab.id='housing-tab-'+option.id;tab.setAttribute('role','tab');tab.setAttribute('aria-controls','housing-option-panel');tab.setAttribute('aria-selected',String(option.id===activeId));tab.tabIndex=option.id===activeId?0:-1;
-      tab.append(optionIcon(option.typology),el('span',option.title,'option-title'),el('small',`${option.concept.metrics.homes} homes · ${option.concept.metrics.storeys} ${option.concept.metrics.storeys===1?'storey':'storeys'} · ${option.concept.metrics.parking} parking`),el('span',option.id===activeId?'Viewing':'View arrangement →','option-action'));
+      const metrics=option.concept.metrics,selected=option.id===activeId;
+      const description=`${option.title} · ${metrics.homes} ${metrics.homes===1?'home':'homes'} · ${metrics.storeys} ${metrics.storeys===1?'storey':'storeys'} · ${metrics.parking} parking`;
+      tab.setAttribute('aria-label',description);tab.title=description;
+      const metric=el('span',undefined,'option-metric');metric.append(el('strong',String(metrics.homes)),el('span',metrics.homes===1?'home':'homes'));
+      const action=el('span',undefined,'option-action');action.append(el('span',selected?'Selected':'View arrangement'),el('span',selected?'✓':'↗','option-action-mark'));
+      tab.append(metric,optionIcon(option.typology),el('span',option.title,'option-title'),action);
       tab.addEventListener('keydown',event=>{const keys=['ArrowLeft','ArrowRight','Home','End'];if(!keys.includes(event.key))return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?options.length-1:(i+(event.key==='ArrowLeft'?-1:1)+options.length)%options.length;onOption?.(options[next].id);});tabs.append(tab);
     }
     requestAnimationFrame(()=>{if(!tabs.isConnected||tabs.scrollWidth<=tabs.clientWidth)return;const active=tabs.querySelector('[aria-selected=true]');if(active)tabs.scrollTo({left:tabs.scrollLeft+active.getBoundingClientRect().left-tabs.getBoundingClientRect().left-(tabs.clientWidth-active.offsetWidth)/2,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});});
