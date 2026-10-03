@@ -1,3 +1,4 @@
+import {mkdirSync,writeFileSync,renameSync} from 'node:fs';
 import {createRunLedger} from './run-ledger.mjs';
 import {createHash} from 'node:crypto';
 import {readdir} from 'node:fs/promises';
@@ -44,7 +45,9 @@ export async function createAppServer(directory = fileURLToPath(new URL('../', i
   const config = await readAppConfig(root, environment);
   const mapsConfig = JSON.stringify(config.maps);
   const scriptRoot=fileURLToPath(new URL('./',import.meta.url)),codeHasher=createHash('sha256');for(const file of (await readdir(scriptRoot)).filter(f=>f.endsWith('.mjs')).sort())codeHasher.update(await readFile(resolve(scriptRoot,file)));
-  const review = createFindingsService({...config.gloo,codeHash:codeHasher.digest('hex'),ledgerFactory:createRunLedger(resolve(root,'.runtime','decision-traces')), onDiagnostic: event => {if (['agent-completed','scenario-completed','scenario-request','scenario-round','scenario-upstream-error'].includes(event.type)) console.info(JSON.stringify(event)); else if (['invalid-assessment','scenario-tool-error'].includes(event.type)) console.warn('Gloo output check:', event.reason);}});
+  const recoveryPath=resolve(root,'.runtime','session-recovery.json');
+  const review = createFindingsService({...config.gloo,onStateChange:records=>{const data=JSON.stringify(records);if(Buffer.byteLength(data)>32000000)return;mkdirSync(resolve(root,'.runtime'),{recursive:true});writeFileSync(recoveryPath+'.next',data,{encoding:'utf8',mode:0o600});renameSync(recoveryPath+'.next',recoveryPath);},codeHash:codeHasher.digest('hex'),ledgerFactory:createRunLedger(resolve(root,'.runtime','decision-traces')), onDiagnostic: event => {if (['agent-completed','scenario-completed','scenario-request','scenario-round','scenario-upstream-error'].includes(event.type)) console.info(JSON.stringify(event)); else if (['invalid-assessment','scenario-tool-error'].includes(event.type)) console.warn('Gloo output check:', event.reason);}});
+  try{const info=await stat(recoveryPath);if(info.size<=32000000)review.restore(JSON.parse(await readFile(recoveryPath,'utf8')));}catch{}
   return createServer(async (request, response) => {
     const fail = (status, message) => {
       response.writeHead(status, { 'Content-Type':'text/plain; charset=utf-8', 'X-Content-Type-Options':'nosniff' });

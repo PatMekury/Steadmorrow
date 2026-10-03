@@ -67,6 +67,16 @@ test('an open research topic accepts its exact route receipt and rejects another
  const m=scripted(entry,[['interpret_priorities',{items:[purpose,{...purpose,original_excerpt:entry.input.priorities.matters,label:'School proximity',kind:'question',research_topic:'school proximity'}]}],['answer_priority',{priority_id:'priority-1',measurement_id:'route-other'}],s=>{assert.match(s.studyState.lastFeedback,/exact original priority/);return ['answer_priority',{priority_id:'priority-1',measurement_id:'route-good'}];},['finish_unresolved_study',{}]]);
  const result=await m.run({assessmentVersion:ref});assert.equal(result.brief[1].answer.id,'route-good');assert.equal(result.brief[1].answer.distanceMeters,777);
 });
+test('effects detail continuation retains omitted structures and offers only receipts for pending concerns',async()=>{
+ const entry=makeEntry('Effects on surrounding structures');entry.e.siteContext.buildings=Array.from({length:40},(_,i)=>({id:'context-'+i,geometry:rect(100+i*10,0,5,5),heightMeters:3}));entry.e.priorityMeasurements=[{id:'other-route',originalExcerpt:'Unrelated school question',distanceType:'street-route'}];
+ const question={...purpose,label:'Effects',original_excerpt:entry.input.priorities.matters,kind:'question',research_topic:'surroundings'};
+ const m=scripted(entry,[['interpret_priorities',{items:[purpose,question]}],['test_layout',params],s=>['assess_surroundings',{concept_id:s.studyState.concepts[0].id,priority_id:'priority-1',sample_times:[]}],(s,payload)=>{
+  const receipt=s.studyState.effects[0];assert.equal(receipt.structuresCoverage.omitted,28);
+  const refs=payload.tools.find(t=>t.function.name==='submit_priority_answer').function.parameters.properties.evidence_refs.items.enum;assert(refs.includes('receipt::'+receipt.id));assert(!refs.includes('receipt::other-route'));
+  return ['read_surroundings_details',{receipt_id:receipt.id,start_structure:25,count:5}];
+ },(s,payload)=>{const detail=JSON.parse(payload.input.findLast(x=>x.type==='function_call_output').output);assert.equal(detail.structures[0].id,'context-24');assert.equal(detail.nextStructure,30);return ['submit_priority_answer',{priority_id:'priority-1',status:'partial',answer:'Mapped separation is measured; environmental effects remain unverified.',applicability:'Only this illustrative massing was measured.',evidence_refs:['receipt::'+s.studyState.effects[0].id],unresolved_checks:['Window orientation and indoor daylight remain unverified.']}];},s=>['review_layout',judgment(s)],s=>['select_layout',select(s)]],{priorityAuditor:async()=>({accepted:true})});
+ const result=await m.run({assessmentVersion:ref});assert.equal(result.effects[0].structures.length,40);assert.equal(result.brief[1].answer.receipts[0].structures.length,40);
+});
 test('short clarification replies retain the initiating refinement and exact server question',async()=>{
  const entry=makeEntry();entry.result.housingRoute='unresolved';
  const first=scripted(entry,[['interpret_priorities',{items:[purpose,{...purpose,original_excerpt:'Add a tall tower',label:'Tower',clarification_issue:'unsupported-explicit-form',clarification_excerpt:'tall tower'}]}],['ask_priority_question',{question:'Would a small apartment building satisfy the housing goal?',priority_id:'priority-1'}]]);

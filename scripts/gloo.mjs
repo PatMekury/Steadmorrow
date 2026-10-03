@@ -163,10 +163,12 @@ export function assessmentSubmission(sources,context,evidence={}){
   }};
 }
 
-export function createFindingsService({apiKey,model='gloo-openai-gpt-5-mini',fetchImpl=fetch,now=Date.now,timeoutMs=45000,assessmentTimeoutMs=90000,runTimeoutMs=180000,maxRounds=20,maxToolCalls=32,sessionFactory=createResearchSession,onDiagnostic=()=>{},assessmentAuditor=auditAssessment,ledgerFactory=memoryLedger,codeHash}={}){
+export function createFindingsService({apiKey,model='gloo-openai-gpt-5-mini',fetchImpl=fetch,now=Date.now,timeoutMs=45000,assessmentTimeoutMs=90000,runTimeoutMs=180000,maxRounds=20,maxToolCalls=32,sessionFactory=createResearchSession,onDiagnostic=()=>{},assessmentAuditor=auditAssessment,ledgerFactory=memoryLedger,codeHash,onStateChange=()=>{}}={}){
   const cache=new Map(),pending=new Map(),contexts=new Map(),checkpoints=new Map();let runs=[],scenarioRuns=0;
   const reserve=()=>{runs=runs.filter(t=>now()-t<60000);if(runs.length>=4||pending.size+scenarioRuns>=2)throw new FindingsError(429,'The research agent is busy. Please try again shortly.');runs.push(now());scenarioRuns++;return ()=>{scenarioRuns--;};};
   const read=createEvidenceClient({now}),webRead=createPublicWebClient({now});
+  const persist=()=>{try{onStateChange([...contexts.values()].filter(c=>now()-c.at<3600000).slice(-4).map(c=>({input:c.input,result:c.result,evidence:c.session.snapshot(),completedTools:c.session.context?.().completedTools??[],at:c.at,scenario:c.scenario,studyHistory:c.studyHistory,originalTexts:c.originalTexts,clarification:c.clarification})));}catch{onDiagnostic({type:'state-save-error'});}};
+
   const review=async(input,{onProgress=()=>{}}={})=>{
     if(input?.executionIntent!==undefined&&!['reuse','fresh','continue'].includes(input.executionIntent))throw new FindingsError(400,'Choose a valid findings action.');
     const executionIntent=input?.executionIntent??'reuse';
@@ -194,7 +196,7 @@ export function createFindingsService({apiKey,model='gloo-openai-gpt-5-mini',fet
         const retained=lastOutput?[lastCall,lastOutput]:[];
         history.splice(1,history.length-1,{role:'user',content:JSON.stringify({completedResearch:events.map(({tool,arguments:args,outcome})=>({tool,args,outcome})),currentEvidence:lastCall?.name==='review_evidence'&&lastOutput?.output?.includes('sources')?undefined:session.context?.()??session.snapshot(),instruction:'This is the current sourced state of your completed tool calls, condensed to remove duplicate navigation and passages. Continue from this evidence, inspect unresolved checks, and choose further tools when needed. All original source IDs and passages remain authoritative; do not invent earlier results.'})},...retained);
       };
-      const finish=(extra={})=>{ledger.record({type:'terminal',status:extra.narrativeStatus??'partial',evidenceVersion:session.snapshot().caseId});if(extra.narrativeStatus==='unavailable'){checkpoints.set(key,{session,seen,lastIssue,at:now(),runId:ledger.id});if(checkpoints.size>16)checkpoints.delete(checkpoints.keys().next().value);}else checkpoints.delete(key);const result={...session.snapshot(),...extra,research:{trace:ledger.summary(),resumedEvidence:Boolean(resume),mode:'gloo-tool-agent',model,modelCalls,toolCalls,events,durationMs:now()-started,firstEvidenceMs,modelTimings},provider:'Gloo AI',execution:{action:resume?'continued':executionIntent==='fresh'?'fresh':'started',runId:ledger.id}};result.version={evidence:result.caseId,assessment:createHash('sha256').update(JSON.stringify([result.caseId,normalized.priorities,result.assessment??null,result.findings??null,result.obstacles??null,result.housingAnalysis??null,result.housingRoute??null])).digest('hex').slice(0,20),scenario:null};contexts.set(result.version.assessment,{session,input:normalized,result,at:now()});if(contexts.size>32)contexts.delete(contexts.keys().next().value);onDiagnostic({type:'agent-completed',durationMs:result.research.durationMs,firstEvidenceMs:result.research.firstEvidenceMs,narrativeStatus:result.narrativeStatus,codeCount:result.code.length,modelCalls,toolCalls,events:events.map(({tool,outcome})=>({tool,outcome}))});return result;};
+      const finish=(extra={})=>{ledger.record({type:'terminal',status:extra.narrativeStatus??'partial',evidenceVersion:session.snapshot().caseId});if(extra.narrativeStatus==='unavailable'){checkpoints.set(key,{session,seen,lastIssue,at:now(),runId:ledger.id});if(checkpoints.size>16)checkpoints.delete(checkpoints.keys().next().value);}else checkpoints.delete(key);const result={...session.snapshot(),...extra,research:{trace:ledger.summary(),resumedEvidence:Boolean(resume),mode:'gloo-tool-agent',model,modelCalls,toolCalls,events,durationMs:now()-started,firstEvidenceMs,modelTimings},provider:'Gloo AI',execution:{action:resume?'continued':executionIntent==='fresh'?'fresh':'started',runId:ledger.id}};result.version={evidence:result.caseId,assessment:createHash('sha256').update(JSON.stringify([result.caseId,normalized.priorities,result.assessment??null,result.findings??null,result.obstacles??null,result.housingAnalysis??null,result.housingRoute??null])).digest('hex').slice(0,20),scenario:null};contexts.set(result.version.assessment,{session,input:normalized,result,at:now()});if(contexts.size>32)contexts.delete(contexts.keys().next().value);persist();onDiagnostic({type:'agent-completed',durationMs:result.research.durationMs,firstEvidenceMs:result.research.firstEvidenceMs,narrativeStatus:result.narrativeStatus,codeCount:result.code.length,modelCalls,toolCalls,events:events.map(({tool,outcome})=>({tool,outcome}))});return result;};
       try{
         for(let round=0;modelCalls<maxRounds;round++){
           signal.throwIfAborted();
@@ -330,7 +332,19 @@ export function createFindingsService({apiKey,model='gloo-openai-gpt-5-mini',fet
   // Compatibility route shares the SAME agent run; it is not a deterministic
   // prefetch path. The browser now starts one run after priorities are entered.
   review.records=review;
-  review.scenario=createScenarioAgent({apiKey,model,fetchImpl,now,reserve,onDiagnostic,ledgerFactory,codeHash,resolveContext:id=>{const c=contexts.get(id);return c&&now()-c.at<3600000?c:null;}});
+  const scenario=createScenarioAgent({apiKey,model,fetchImpl,now,reserve,onDiagnostic,ledgerFactory,codeHash,resolveContext:id=>{const c=contexts.get(id);return c&&now()-c.at<3600000?c:null;}});
+  review.scenario=async(...args)=>{try{return await scenario(...args);}finally{persist();}};
+  // Only the local server supplies recovery records. There is no HTTP import.
+  review.restore=records=>{let restored=0;for(const saved of (Array.isArray(records)?records:[]).slice(-4)){try{
+    if(!Number.isFinite(saved.at)||saved.at>now()||now()-saved.at>=3600000||!['ready','partial'].includes(saved.result?.narrativeStatus))continue;
+    const input=validateInput(saved.input),result=saved.result;
+    const expected=createHash('sha256').update(JSON.stringify([result.caseId,input.priorities,result.assessment??null,result.findings??null,result.obstacles??null,result.housingAnalysis??null,result.housingRoute??null])).digest('hex').slice(0,20);
+    if(result.version?.assessment!==expected)continue;
+    const session=sessionFactory(input,{now,read,webRead,initialEvidence:saved.evidence,completedTools:saved.completedTools});
+    if(session.snapshot().caseId!==saved.evidence.caseId)continue;
+    contexts.set(expected,{session,input,result,at:saved.at,scenario:saved.scenario,studyHistory:saved.studyHistory,originalTexts:saved.originalTexts,clarification:saved.clarification});
+    cache.set(createHash('sha256').update(JSON.stringify(input)).digest('hex'),{time:saved.at,value:result});restored++;
+  }catch{}}return restored;};
   return review;
 }
 

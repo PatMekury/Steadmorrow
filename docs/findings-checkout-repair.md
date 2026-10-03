@@ -52,3 +52,15 @@ Corrections now include:
 - Route detail describes mapped candidates and expressly leaves requested subtype, public access, operation and eligibility unverified. Open category labels cannot certify those facts.
 
 253 automated tests pass at this stage. Actual installed acceptance and the final server/commit are recorded in the workspace installation record; do not infer an end-to-end live pass from the isolated tests. Presentation work remains deferred. AI source review is not legal or expert approval.
+
+## Accepted property research and dense-context study recovery
+
+The installed Chrome research on October 3 completed in 136.922 seconds, twelve model calls and fifteen tools. It matched the real parcels, retrieved operative provisions, rejected one overbroad draft, and accepted a conditional assessment. Chrome showed “New housing may be possible, subject to the conditions below,” with the purpose and two separate concern cards. This establishes a qualified exploration route, not legal permission or affordable delivery.
+
+The ensuing study retrieved a partial walking receipt and tested four arrangements, including a placed apartment mass. It failed while attaching its surroundings answer. Hundreds of structure measurements were repeated in the model context (peak 88,979 input tokens), and its offered evidence choices included receipts belonging to already answered concerns. Those failures are retained, not counted as successful studies.
+
+The model now sees a bounded nearest/overlap projection of dense surroundings receipts, explicit omitted counts, and a `read_surroundings_details` continuation for every retained structure. Full server/UI measurements remain unchanged. Factual-answer receipt choices are limited to pending concerns; rejected binding reports the exact eligible receipts. Regression tests cover another concern's receipt, dense context, subsequent detail pages, and retention of the complete measurement in the final answer.
+
+Local server recovery now retains up to four investigations for one hour, capped at 32 MB in the ignored `.runtime/session-recovery.json`. No import endpoint is exposed. Restore validates selected geometry, source-text hashes, evidence identity, assessment/priorities identity and age; explicit fresh findings still bypass cache. Successful and failed study history, original concerns and pending clarification are retained. The current accepted result was bootstrapped from the actual cached service response. Four archived tests were recalculated from their original tool arguments and matched the original receipt IDs and metrics exactly; this reconstruction used no model or public lookups. This permits a study-only retry after installing the fixes.
+
+Final installed validation, live retry outcome and limitations are recorded in the workspace report and installation record. Earlier pending-approval text is historical: the user explicitly approved the actual property/Gloo check.

@@ -10,6 +10,10 @@ test('model projection preserves receipt facts and source qualifications without
  assert.deepEqual(view.sources,original.sources);assert.equal(view.answer.route.mode,'walking');assert.equal(view.answer.route.streets,undefined);assert.equal(view.answer.route.geometry,undefined);
  assert.ok(JSON.stringify(view).length<1000);
 });
+test('dense surroundings receipts have a bounded model view and an explicit complete-record continuation',()=>{
+ const receipt={id:'effects-real',kind:'surroundings-effects',originalExcerpt:'Effects on neighbors',conceptId:'concept',structures:Array.from({length:900},(_,i)=>({id:'building-'+i,minimumSeparationMeters:i+.5})),shadows:[{instant:'2026-12-21T18:00:00Z',groundProjectionOverlaps:[{structureId:'building-800',squareMeters:4}]}],limitations:['Ground projection is not indoor daylight.']};
+ const view=studyView(receipt);assert.equal(receipt.structures.length,900);assert.equal(view.structures.length,13);assert.equal(view.structures[0].minimumSeparationMeters,.5);assert.equal(view.structures.at(-1).id,'building-800');assert.equal(view.structuresCoverage.omitted,887);assert.equal(view.structuresCoverage.continuation.receipt_id,receipt.id);assert.deepEqual(view.limitations,receipt.limitations);assert.ok(JSON.stringify(view).length<3000);
+});
 
 test('unchanged reviews cannot grow the conversation; evidence changes reopen review and retire old state',async()=>{
  const evidence={caseId:'b'.repeat(20),sources:[{id:'s1',passages:[{id:'p1',text:'A qualified source.'}]}],priorityMeasurements:[{id:'route-1',distanceType:'street-route',kind:'police',distanceMeters:836,route:{streets:[{geometry:Array(20000).fill([1,2])}]}}]};

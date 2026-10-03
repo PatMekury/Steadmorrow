@@ -78,7 +78,7 @@ export function validateToolArguments(name,args){
 // Each session owns the selected geometry, accepted sources and section IDs.
 // The model chooses tools and follow-ups; it cannot supply arbitrary fetch URLs,
 // change the location, fabricate a source, or promote its prose into a record.
-export function createResearchSession(input,{read=createEvidenceClient(),webRead=createPublicWebClient(),readHeights=readOvertureHeights,now=Date.now,signal}={}){
+export function createResearchSession(input,{read=createEvidenceClient(),webRead=createPublicWebClient(),readHeights=readOvertureHeights,now=Date.now,signal,initialEvidence,completedTools=[]}={}){
   const selected=selectedGeometry(input.points);
   const inputs=goalItems(input.priorities??{});if(!inputs.length)inputs.push({id:'input-housing',text:'Explore housing possibilities'});
   const state={goalItems:inputs,concernBrief:null,coverageMap:[],schemaVersion:2,caseId:digest(input.points).slice(0,20),generatedAt:new Date(now()).toISOString(),status:'partial',evidenceStatus:'retrieved-records',selectedArea:{geometry:selected,squareMeters:multiArea(selected)},locality:null,parcel:null,parcelCandidates:[],zones:[],housing:null,sources:[],gaps:[],code:[],assessment:null,checks:[],capacity:null,codeAccess:[],planningSystem:{type:'unresolved',sources:[],codeLinks:[]}};
@@ -337,6 +337,16 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
     if(name==='resolve_location'&&(state.locality||locationAttempts>=2))return [];
     return [t];
   });
+  if(initialEvidence){
+    if(initialEvidence.schemaVersion!==2||JSON.stringify(initialEvidence.selectedArea?.geometry)!==JSON.stringify(selected))throw new Error('Saved evidence does not match the selected outline.');
+    if(initialEvidence.sources.some(s=>s.completeness?.textHash!==sourceCompleteness(s).textHash))throw new Error('Saved source text no longer matches its retained receipt.');
+    Object.assign(state,structuredClone(initialEvidence));
+    for(const check of initialEvidence.checks??[])checks.set(check.name,check.status);
+    for(const name of completedTools)completed.add(name);
+    if(state.parcel)discoveredKinds.add('parcel');if(state.zones.length||state.planningSystem.type==='no-zoning')discoveredKinds.add('zoning');
+    if(state.concernBrief)concernCoverage(inputs,state.concernBrief);
+    if(snapshot().caseId!==initialEvidence.caseId)throw new Error('Saved evidence identity does not match its original sources.');
+  }
   const toolCacheKey=(name,args)=>name==='resolve_location'?String(locationAttempts):name==='read_map_source'&&layers.get(args.source_id)?.kind==='zoning'?(state.parcel?.key??'selected-area'):'';
   const toolLane=(name,args)=>name==='resolve_location'||name==='review_evidence'?'exclusive':name==='read_map_source'?'geometry':/code|chapter/.test(name)?'code':/official/.test(name)?'official':name==='discover_map_sources'?'discovery-'+args.kind:name==='read_site_context'?'site-context':['read_nearby_schools','read_nearby_places'].includes(name)?'nearby-places':name;
   return {execute,snapshot,context,requiredFollowUps,toolDefinitions:()=>state.concernBrief?toolDefinitions().filter(t=>t.function.name!=='interpret_concerns'):researchTools.filter(t=>t.function.name==='interpret_concerns'),toolCacheKey,toolLane,addPriorityTexts:values=>{for(const value of values)if(typeof value==='string'&&value.length<=600&&priorityTexts.size<32)priorityTexts.add(value);},renewSignal:next=>{signal=next;officialPages?.renewSignal?.(next);}};

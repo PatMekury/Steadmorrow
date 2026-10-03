@@ -4,6 +4,11 @@ const displayArrays=new Set(['streets','buildings','roads','parking','maneuver']
 export function studyView(value){
   if(Array.isArray(value))return value.map(studyView);
   if(!value||typeof value!=='object')return value;
+  if(value.kind==='surroundings-effects'&&value.structures?.length>24){
+    const overlapIds=new Set((value.shadows??[]).flatMap(s=>(s.groundProjectionOverlaps??[]).map(o=>o.structureId)));
+    const nearby=value.structures.slice(0,12),visible=[...nearby,...value.structures.filter(s=>overlapIds.has(s.id)&&!nearby.includes(s)).slice(0,12)];
+    value={...value,structures:visible,structuresCoverage:{total:value.structures.length,shown:visible.length,omitted:value.structures.length-visible.length,selection:'Nearest twelve plus up to twelve mapped ground-projection overlaps; not a complete inventory.',continuation:{tool:'read_surroundings_details',receipt_id:value.id,start_structure:1,count:12}},shadows:(value.shadows??[]).map(s=>({...s,...(s.groundProjectionOverlaps?{groundProjectionOverlaps:s.groundProjectionOverlaps.filter(o=>visible.some(b=>b.id===o.structureId)),overlappingStructureCount:s.groundProjectionOverlaps.length}:{} )}))};
+  }
   const result={};
   for(const [key,item]of Object.entries(value)){
     if(key==='geometry'||key==='site')continue;
