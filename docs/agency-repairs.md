@@ -39,7 +39,7 @@ Public planning overlays, recorded instruments, easements, covenants and associa
 
 ## Verification
 
-All 246 tests and syntax checks pass. See workspace `output/verification/agency-repairs-2026-10-02/README.md` for full synthetic live history and the browser screenshot. The new tests exercise production validators and agent transitions. Legacy scripted agent fixtures were updated to supply the new required critique/selection fields; adversarial tests call the unwrapped production agent.
+All 248 tests and syntax checks pass. See workspace `output/verification/agency-repairs-2026-10-02/README.md` for full synthetic live history and the browser screenshot. The new tests exercise production validators and agent transitions. Legacy scripted agent fixtures were updated to supply the new required critique/selection fields; adversarial tests call the unwrapped production agent.
 
 A wholly fictional Gloo run completed in 55.065 seconds using 10 model calls including one option audit and one factual-answer audit, and nine tools. It split the mixed input into four concerns, tested one apartment arrangement, measured surroundings, accepted a partial physical-effects answer, retained unresolved private restrictions, re-reviewed after the answer changed and explicitly selected the reviewed concept. This demonstrates the contract, not engineering correctness or general performance. The model's courtyard/design prose is an interpretation; the measured massing does not solve a courtyard, landscape, circulation or interior plan.
 
@@ -50,3 +50,12 @@ No new full property research, real-parcel Gloo validation, mobile-device certif
 ## Persistence and retention
 
 Decision traces survive server restart. Agent checkpoints and active runs remain process-memory state, with the existing expiry; a durable trace is not resumable execution. Saved browser evidence/geometry is retained locally and version checked. Server restart can require a fresh findings check before new study actions. `.runtime` is ignored by Git and refused by the HTTP file server. Traces are local records under the same study-data retention responsibility; do not publish them without review.
+
+
+## Further acceptance testing
+
+Workspace `output/verification/agency-acceptance-2026-10-02/README.md` records the complete matrix and failed attempts. Live interpretation found duplicate whole-sentence cards and re-merging during the research-to-study handoff. The contract now rejects duplicate excerpts, preserves research-separated spans in study coverage, and uses medium reasoning plus generic atomicity guidance during interpretation only. Two new regressions exercise rejection and recovery.
+
+Final fictional prompts separated eight and seven concerns; a held-out research-to-study check preserved all eight concerns, including separate access and repair questions and one broad environmental-effects question. This phase used thirteen successful model responses and one harness HTTP 422. Earlier semantic failures remain documented. Initial interpretation is still model-dependent, not an exhaustive natural-language guarantee.
+
+The installed frontend passed a full-page fictional HTTP journey: automatic study, all seven concerns, route detail, keyboard alternatives, saved reload without new requests, failed refinement retry after reload, clarification after reload, source quote expansion and explicit fresh findings. Desktop and 390 CSS-pixel DOM/layout checks had no horizontal overflow. Screenshot capture timed out; no physical-device visual pass is claimed. Real church evidence was not sent or replaced. Existing real-data approval limits and presentation deferral remain.
