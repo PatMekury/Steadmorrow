@@ -27,6 +27,7 @@ export function validateDesignBrief(raw,sources){
   const standards=raw.standards.map(rule=>{
     const refs=rule.support.map(r=>{const s=sources.find(s=>s.id===r.sourceId&&!s.scopeConflict),p=s?.passages?.find(p=>p.id===r.passageId);if(!p)throw Error('Home design needs an actual current source passage.');const q={sourceId:s.id,quote:p.text};support.push(q);return q;});
     if(rule.metric!=='other'){
+      if(rule.metric==='edge-clearance-min'&&/\b(?:street|road|thoroughfare|frontage|front yard)\b/i.test(rule.requirement+' '+rule.applicability+' '+refs.map(r=>r.quote).join(' ')))throw Error('A street/frontage building line cannot be checked as a uniform clearance from EVERY parcel edge. Keep that original requirement as metric other with a precise unresolved frontage/applicability check. Use edge-clearance-min only for an established uniform all-edge clearance; do not discard the cited building-line requirement.');
       const area=rule.metric.includes('area');if(!(area?['sq-ft','sq-m']:['feet','meters']).includes(rule.unit)||rule.value<=0)throw Error('Numeric standard '+rule.requirement+' needs a positive original-source value in matching area or length units. Unknown/nonnumeric requirements use metric other, value 0, unit not-numeric; do not supply a fake numeric minimum.');
       const values=refs.flatMap(r=>r.quote.replace(/(?<=\d),(?=\d{3})/g,'').match(/\d+(?:\.\d+)?/g)??[]).map(Number);
       if(!values.includes(rule.value))throw Error('The numeric design standard must appear in its original cited passage; do not invent a minimum.');

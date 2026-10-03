@@ -61,6 +61,17 @@ test('a fully tested no-fit study can explain unavailable proposal effects witho
  const result=await scripted(entry,steps).run({assessmentVersion:ref});assert.equal(result.status,'no-fit');assert.equal(result.brief[1].answer.status,'unresolved');assert.equal(result.effects.length,0);
 });
 const select=(s,c=s.studyState.concepts[0])=>({concept_id:c.id,rationale:'The compact arrangement leaves room between buildings.',support:[],selections:(s.studyState.options??[]).filter(o=>o.useStatus==='conditional').map(o=>{const chosen=o.id===c.optionId?c:s.studyState.concepts.find(c=>c.optionId===o.id&&c.buildingsCount);return {option_id:o.id,concept_id:chosen.id,review_id:s.studyState.reviews.find(r=>r.conceptId===chosen.id).id,rationale:'The spacing preserves a useful outdoor area.'};}),unresolved_option_ids:(s.studyState.options??[]).filter(o=>o.useStatus==='unresolved').map(o=>o.id)});
+test('agent can fit a reviewed home brief and select only after critiquing the measured result',async()=>{
+ const entry=makeEntry(),{width,depth,...fit}=params;
+ const m=scripted(entry,[['interpret_priorities',{items:[purpose]}],['plan_housing_options',{options:[option]}],(s,p)=>{
+  const schema=p.tools.find(t=>t.function.name==='fit_layout').function.parameters;
+  assert.ok(!schema.properties.width);assert.ok(!schema.required.includes('width'));
+  return ['fit_layout',{...fit,option_id:'option-1'}];
+ },s=>['review_layout',judgment(s)],s=>['select_layout',select(s)]],{optionAuditor:async()=>({accepted:true,issues:[]})});
+ const result=await m.run({assessmentVersion:ref});
+ assert.ok(result.concept.buildings.length);assert.ok(result.concept.designCheck.grossOrAllocatedAreaPerHome>=result.concept.designBrief.minimumAllocatedAreaPerHomeSquareMeters);
+ assert.equal(result.concept.diagnostics.sizingSearch.exhaustive,false);
+});
 
 test('mixed clauses and more than four concerns are covered without a preset research taxonomy',async()=>{
  const matters='Keep the hall and check community restrictions; compare shadow effects; check construction noise; check tree loss; check service capacity';

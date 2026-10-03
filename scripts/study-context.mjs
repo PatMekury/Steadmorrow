@@ -81,7 +81,7 @@ export function studyExchangeView(tool,output){
   if(['plan_housing_options','revise_housing_plan'].includes(tool))return {
     status:output.status,planVersion:output.planVersion,review:output.review,
     storedIn:'studyState.options: the accepted options and full design briefs are in the current state.'};
-  if(['test_layout','review_layout'].includes(tool))return {id:output.id,status:output.status,metrics:output.metrics,observationId:output.observationId,
+  if(['test_layout','fit_layout','review_layout'].includes(tool))return {id:output.id,status:output.status,metrics:output.metrics,observationId:output.observationId,
     ignoredParameters:output.ignoredParameters,parameterNotes:output.parameterNotes,
     storedIn:'studyState.concepts and studyState.reviews'};
   if(['assess_surroundings','submit_priority_answer','answer_priority'].includes(tool))return {

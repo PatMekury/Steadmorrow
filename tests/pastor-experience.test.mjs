@@ -5,7 +5,35 @@ import {frameRouteFromSite} from '../route-camera.js';
 import {surroundingSummary} from '../pastor-copy.js';
 import {validateDesignBrief,checkHomeDesign} from '../scripts/home-design.mjs';
 import {auditHousingOptions} from '../scripts/housing-options-audit.mjs';
+import {fitHomeLayout} from '../scripts/home-layout-search.mjs';
+import {parcelStudy} from '../scripts/parcel-study.mjs';
+import {multiArea,overlapArea} from '../scripts/site-geometry.mjs';
 const brief={household:'Two-bedroom homes for families',basis:'Fictional source fixture; room sizes are design allowances.',rooms_per_home:{bedroom_areas_m2:[12,12],living_dining_m2:18,kitchen_m2:10,bathrooms_m2:6,storage_m2:4,other_m2:0},interior_reserve_percent:20,floor_structure_meters:.3,standards:[],unresolved_checks:['Check doors, daylight and access.']};
+test('frontage-only building lines cannot masquerade as all-edge clearance',()=>{
+ const sources=[{id:'s',passages:[{id:'p',text:'A building line of 25 feet along major thoroughfares is required unless otherwise authorized.'}]}];
+ const rule={requirement:'Street building line',scope:'applicable',applicability:'Frontage classification needs checking.',metric:'edge-clearance-min',value:25,unit:'feet',support:[{sourceId:'s',passageId:'p'}]};
+ assert.throws(()=>validateDesignBrief({...brief,standards:[rule]},sources),/EVERY parcel edge/);
+ const b=validateDesignBrief({...brief,standards:[{...rule,metric:'other',value:0,unit:'not-numeric'}]},sources);
+ assert.equal(b.standards[0].support[0].quote,sources[0].passages[0].text);
+});
+test('bounded home sizing preserves the family room budget and individual parcel containment',()=>{
+ const mx=111195*Math.cos(Math.PI/6),geo=([x,y])=>[-95+x/mx,30+y/111195];
+ const rect=(x,y,w,h)=>[[[[x,y],[x+w,y],[x+w,y+h],[x,y+h],[x,y]].map(geo)]];
+ const selected=rect(0,0,40,17),members=[{id:'left',key:'left',geometry:rect(0,0,20,17)},{id:'right',key:'right',geometry:rect(20,0,20,17)}];
+ const e={caseId:'fixture',status:'preliminary',selectedArea:{geometry:selected},parcel:parcelStudy(members,selected).parcel,siteContext:{geometryVersion:'fixture',buildings:[],roads:[]}};
+ const b=validateDesignBrief(brief,[]),common={storeys:2,storey_height:3.6,spacing:3,edge_clearance:2,angle:0,homes:4,parking_spaces:0};
+ for(const typology of ['attached','apartment']){
+  const c=fitHomeLayout(e,{...common,typology,...(typology==='attached'?{homes_per_row:2}:{units_per_floor:2,circulation_percent:25})},b);
+  assert.ok(c.metrics.homes>0,typology+' should place homes');
+  assert.ok(c.designCheck.grossOrAllocatedAreaPerHome>=b.minimumAllocatedAreaPerHomeSquareMeters);
+  assert.ok(c.diagnostics.sizingSearch.candidates.length<=8);
+  assert.equal(c.diagnostics.sizingSearch.exhaustive,false);
+  for(const building of c.buildings)assert.ok(members.some(p=>Math.abs(overlapArea(p.geometry,building.geometry)-multiArea(building.geometry))<.01));
+ }
+ const impossible=fitHomeLayout({...e,parcel:{geometry:rect(0,0,3,3)},parcels:[],selectedArea:{geometry:rect(0,0,3,3)}},{...common,typology:'detached'},b);
+ assert.equal(impossible.metrics.homes,0);assert.equal(impossible.status,'no-fit');
+ assert.ok(impossible.designCheck.grossOrAllocatedAreaPerHome>=b.minimumAllocatedAreaPerHomeSquareMeters);
+});
 test('home room budget rejects the old small family row while allowing a larger two-storey test',()=>{
  const b=validateDesignBrief(brief,[]),p={typology:'attached',width:5.5,depth:10,storeys:1,storey_height:3};
  assert.throws(()=>checkHomeDesign(p,b),/below the agreed/);
