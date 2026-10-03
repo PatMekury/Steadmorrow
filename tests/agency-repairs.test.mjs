@@ -38,12 +38,19 @@ test('a still-unanswered route keeps its lookup tool after ten study steps',asyn
  const entry=makeEntry('How far is the school?');entry.session.toolDefinitions=()=>[{type:'function',function:{name:'read_nearby_places',parameters:{properties:{}}}}];let n=0;
  const run=createScenarioAgent({optionCount:1,resolveContext:()=>entry,reserve:()=>()=>{},fetchImpl:async(_,request)=>{
   const body=JSON.parse(request.body);n++;
-  if(n===1)return response('interpret_priorities',{items:[purpose,{label:'School',meaning:'Check travel distance',original_excerpt:'How far is the school?',kind:'question',target:'whole-site',research_topic:'place-route',measurement_needed:'street-route'}]},n);
+  if(n===1)return response('interpret_priorities',{items:[purpose,{label:'School',meaning:'Check travel distance',original_excerpt:'How far is the school?',kind:'requirement',target:'whole-site',research_topic:'school proximity and site selection',measurement_needed:'street-route'}]},n);
   if(n===2)return response('test_layout',params,n);
   if(n<12)return Response.json({status:'incomplete',output:[]});
   assert.ok(body.tools.some(t=>t.function.name==='read_nearby_places'),'Late lookup must remain available');throw Error('late lookup verified');
  }});
  await assert.rejects(run({assessmentVersion:ref}),/late lookup verified/);assert.equal(n,12);
+});
+
+test('an open-topic proximity requirement cannot be silently dropped from final selection',async()=>{
+ const entry=makeEntry('Near an elementary school');const m=scripted(entry,[['interpret_priorities',{items:[purpose,{label:'School',meaning:'Measure travel to school',original_excerpt:'Near an elementary school',kind:'requirement',target:'land',research_topic:'school proximity and site selection',measurement_needed:'street-route'}]}],['test_layout',params],s=>['review_layout',judgment(s)],(s,p)=>{
+  assert.ok(!p.tools.some(t=>t.function.name==='select_layout'));return ['select_layout',select(s)];
+ },s=>{assert.match(s.studyState.lastFeedback,/Answer factual priorities/);throw Error('proximity selection gate verified');}]);
+ await assert.rejects(m.run({assessmentVersion:ref}),/proximity selection gate verified/);
 });
 
 test('a fully tested no-fit study can explain unavailable proposal effects without inventing measurements',async()=>{
