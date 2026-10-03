@@ -67,6 +67,8 @@ export function priorityValue(item,{result,scenario,simulationState={}}){
   const answer=currentRouteAnswer(item.answer),measurement=answer?.measurement??answer,distance=measurement?.distanceMeters;
   if(Number.isFinite(distance)){const value=distance>=1000?number(distance/1000)+' km':Math.round(distance)+' m';return answer?.status==='partial'?value+' · partial':value;}
   if(answer?.status==='answered')return 'Found';
+  if(answer?.status==='partial')return 'Partial answer';
+  if(answer?.status==='needs-expert')return 'Expert check needed';
   if(answer?.status==='unresolved'||item.unresolved)return 'Not confirmed';
   if(item.pending||simulationState.busy)return 'Checking…';
   if(item.kind==='question')return 'Not established';
@@ -107,7 +109,7 @@ export function sceneOutcome(result,scenario){
   return 'We cannot yet tell whether new housing is allowed on this land.';
 }
 function sourceLinks(host,support,sources){
-  for(const item of support??[]){const source=sources.find(s=>s.id===item.sourceId);if(!source)continue;const d=el('details',undefined,'spatial-source');d.dataset.evidenceKey='housing-source:'+source.id+':'+(item.quote??'').slice(0,40);d.append(el('summary',source.title),el('blockquote',item.quote));const a=el('a','Open original source ↗');a.href=source.url;a.target='_blank';a.rel='noopener noreferrer';d.append(a);host.append(d);}
+  for(const item of support??[]){const source=(sources??[]).find(s=>s.id===item.sourceId);if(!source)continue;const d=el('details',undefined,'spatial-source');d.dataset.evidenceKey='housing-source:'+source.id+':'+(item.quote??'').slice(0,40);d.append(el('summary',source.title),el('blockquote',item.quote));const a=el('a','Open original source ↗');a.href=source.url;a.target='_blank';a.rel='noopener noreferrer';d.append(a);host.append(d);}
 }
 function appendHousingAnalysis(host,result){
   const a=result.housingAnalysis;
@@ -161,7 +163,8 @@ export function createSpatialExperience({result,scenario,simulationState={},user
     requestAnimationFrame(()=>{if(!tabs.isConnected||tabs.scrollWidth<=tabs.clientWidth)return;const active=tabs.querySelector('[aria-selected=true]');if(active)tabs.scrollTo({left:tabs.scrollLeft+active.getBoundingClientRect().left-tabs.getBoundingClientRect().left-(tabs.clientWidth-active.offsetWidth)/2,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});});
     optionControls=el('div',undefined,'option-dock');optionControls.append(el('p',options.length===1?'One reviewed arrangement':'Explore the arrangements','option-dock-title'),tabs);if(options.length===1)optionControls.append(el('p','Only this arrangement currently has a placed, reviewed result. Other possibilities remain open.','option-dock-note'));
     const option=options.find(o=>o.id===activeId),detail=el('details',undefined,'housing-option-detail');detail.append(el('summary','Why this option · housing-use conditions'));optionDetail=detail;
-    detail.append(el('p',option?.dimensionBasis),el('p',option?.applicability,'option-qualification'));sourceLinks(detail,option?.support,scenario?.sources??result.sources);
+    detail.append(el('p',option?.rationale??'Selection rationale was not recorded in this saved study.'),el('p',option?.dimensionBasis),el('p',option?.applicability,'option-qualification'));sourceLinks(detail,option?.support,scenario?.sources??result.sources);
+    if(option?.review){const critique=el('details');critique.append(el('summary','Review of this arrangement'));for(const finding of option.review.priorityFindings??[])critique.append(el('p',finding.finding));for(const limitation of option.review.limitations??[])critique.append(el('p',limitation));detail.append(critique);}
   }
   const surface=el('div',undefined,'site-surface');if(options.length){surface.id='housing-option-panel';surface.setAttribute('role','tabpanel');surface.setAttribute('aria-labelledby','housing-tab-'+(scenario.activeOptionId??options[0].id));}stage.append(surface);if(optionControls)stage.append(optionControls);
   const canvasKey=JSON.stringify(result.selectedArea?.geometry??[]);
@@ -234,7 +237,7 @@ export function createSpatialExperience({result,scenario,simulationState={},user
     const design=el('details',undefined,'housing-option-detail');design.append(el('summary','Parking, entrances & open space'),el('p',concept.siteDesign?.reason??'This saved arrangement uses available space for parking; its relationship to street frontage has not been resolved.'),el('p','Each bay is 2.6 × 5 m; the lightly shaded maneuvering strip is 6 m deep. Door positions are illustrative. A driveway, continuous accessible walking route, fire access and landscape plan still need site review.'));stage.append(design);}
 
   const outcome=el('p',sceneOutcome(result,scenario),'site-outcome');outcome.setAttribute('role','status');stage.insertBefore(outcome,caption);
-  if(simulationState.error){const error=el('p',simulationState.error,'scene-error');error.setAttribute('role','alert');stage.append(error,button('Try the study again',()=>onSimulate?.(''),'site-text-button'));}
+  if(simulationState.error){const error=el('p',simulationState.error,'scene-error');error.setAttribute('role','alert');stage.append(error,button('Try the study again',()=>onSimulate?.(simulationState.refinement??''),'site-text-button'));}
   appendContextAttribution(stage,context,'scene-attribution');
   if(context?.status==='unavailable')stage.append(el('p','Nearby building shapes could not be loaded.','scene-context-note'));
   else if(context?.status==='partial')heightNote.append(el('p','The map may omit nearby buildings or building parts.'));
@@ -247,7 +250,7 @@ export function createSpatialExperience({result,scenario,simulationState={},user
   if(result.parcel?.members?.length>1&&positions.length<3&&!askedTargets.has('land'))addCallout('Separate property rights','property',`Your selection includes ${result.parcel.members.length} mapped parcels. This study retains each boundary. Common ownership and any consolidation needed for development remain unverified.`,'constraint');
 
   left.append(el('h3','What matters to you'),el('p','Open a priority to explore it on the map.','priority-guidance'));
-  const brief=simulationState.brief??scenario?.brief;
+  const brief=simulationState.brief??scenario?.brief??result.concernBrief;
   const original=[userPriorities.purpose,userPriorities.matters,...(userPriorities.choices??[])].filter(Boolean);
   const priorityInputs=brief?.length?brief:original.map((text,i)=>({id:'pending-'+i,label:text,originalExcerpt:text,pending:result.narrativeStatus==='researching',unresolved:result.narrativeStatus!=='researching'}));
   const priorities=uniquePriorities(priorityInputs.map(item=>({...item,answer:item.answer??(result.priorityMeasurements??[]).findLast(m=>m.originalExcerpt&&(item.originalExcerpt??'').includes(m.originalExcerpt))??(scenario?.priorityAnswers??[]).find(a=>a.priorityId===item.id)})));
@@ -259,10 +262,14 @@ export function createSpatialExperience({result,scenario,simulationState={},user
     const value=priorityValue(item,{result,scenario,simulationState});
     const sourceLabel=item.label||item.originalExcerpt||'Your priority';
     const label=sourceLabel.charAt(0).toUpperCase()+sourceLabel.slice(1);
-    const showPriority=trigger=>{if(measurement?.feature?.id)retained.view?.focus(measurement.feature.id);else retained.view?.focus('selection');reveal(trigger,measurement?.feature?.id||item.target||'selection',distance!==null?`${(measurement.mode??'walking').replace(/^./,c=>c.toUpperCase())} route`:label,distance!==null?(measurement.feature?.name??'Mapped destination'):(answer?.detail||answer?.headline||answer?.explanation||item.meaning||'This is part of the request being explored.'),d=>{
+    const showPriority=trigger=>{if(measurement?.feature?.id)retained.view?.focus(measurement.id);else retained.view?.focus('selection');reveal(trigger,measurement?.id||item.target||'selection',distance!==null?`${(measurement.mode??'walking').replace(/^./,c=>c.toUpperCase())} route`:label,distance!==null?(measurement.feature?.name??'Mapped destination'):(answer?.detail||answer?.headline||answer?.explanation||item.meaning||'This is part of the request being explored.'),d=>{
       if(distance!==null){d.append(el('strong',`${value} · ${measurement.mode??'walking'}`,'priority-distance'));if(Number.isFinite(measurement.durationSeconds))d.append(el('p',`About ${Math.max(1,Math.round(measurement.durationSeconds/60))} min · estimated travel time`));}
       let detailHost=d;if(measurement?.detail){if(distance!==null){const check=el('details',undefined,'priority-original');check.open=answer?.status==='partial';check.append(el('summary','How this route was checked'),el('p',measurement.detail));d.append(check);detailHost=check;}else if(measurement.detail!==(answer?.detail||answer?.headline||answer?.explanation))d.append(el('p',measurement.detail));}
       if(measurement?.route?.attribution){const a=el('a',measurement.route.attribution+' ↗');a.href='https://valhalla.openstreetmap.de/';a.target='_blank';a.rel='noopener noreferrer';detailHost.append(a);}
+      if(answer?.applicability)detailHost.append(el('p',answer.applicability));
+      for(const check of answer?.unresolvedChecks??[])detailHost.append(el('p',check));
+      sourceLinks(detailHost,answer?.support??[],scenario?.sources??result.sources);
+      for(const receipt of answer?.receipts??[]){if(receipt.kind!=='surroundings-effects')continue;const measured=el('details');measured.append(el('summary','What was measured'),el('p',`Proposed building footprint: ${number(receipt.proposalGroundFootprintSquareMeters)} m². This does not establish net added paved area.`));for(const structure of receipt.structures.slice(0,10))measured.append(el('p',`${structure.name} (${structure.id}): ${number(structure.minimumSeparationMeters)} m from the proposed massing. Existing height ${structure.existingHeightMeters===null?'unknown':number(structure.existingHeightMeters)+' m, '+structure.heightBasis}.`));if(receipt.structures.length>10)measured.append(el('p',`Showing the closest ten of ${receipt.structures.length} mapped structures.`));for(const sample of receipt.shadows)measured.append(el('p',sample.status==='unresolved'?`${sample.instant}: ${sample.reason}`:`${sample.instant}: proposed ground-shadow projection ${number(sample.proposedGroundShadowSquareMeters)} m². This is a sampled ground-plane estimate, not indoor daylight loss.`));for(const limitation of receipt.limitations)measured.append(el('p',limitation));detailHost.append(measured);}
       if(item.originalExcerpt){const asked=el('details',undefined,'priority-original');asked.append(el('summary','Your question'),el('blockquote','“'+item.originalExcerpt+'”'));detailHost.append(asked);}
       const url=answer?.feature?.sourceUrl??answer?.sourceUrl??measurement?.feature?.sourceUrl??measurement?.sourceUrl;if(url){const a=el('a','View the source ↗');a.href=url;a.target='_blank';a.rel='noopener noreferrer';detailHost.append(a);}
     });};
@@ -273,7 +280,7 @@ export function createSpatialExperience({result,scenario,simulationState={},user
   const canRefine=Boolean(result.version?.assessment&&result.parcel&&result.status!=='needs-parcel'&&!result.locality?.boundaryUncertain&&!result.locality?.authorityUnresolved&&!simulationState.busy);
   const add=button('Add a concern +',()=>{form.hidden=!form.hidden;if(!form.hidden)input.focus();},'add-concern');add.disabled=!canRefine;left.append(add);
   const form=el('form',undefined,'priority-refine');form.hidden=!simulationState.question;
-  const label=el('label',simulationState.question||'What else matters to you?');label.htmlFor='scenario-refinement';const input=el('textarea');input.id='scenario-refinement';input.rows=3;input.maxLength=600;input.placeholder='For example, how close is the nearest school?';input.value=simulationState.refinement??'';
+  const label=el('label',simulationState.question||'What else matters to you?');label.htmlFor='scenario-refinement';const input=el('textarea');input.id='scenario-refinement';input.rows=3;input.maxLength=600;input.placeholder='Ask what matters to you. You can include several concerns together.';input.value=simulationState.refinement??'';
   const send=el('button','Update the study','priority-submit');send.type='submit';send.disabled=!canRefine;form.append(label,input,send);left.append(form);
   form.addEventListener('submit',e=>{e.preventDefault();if(!input.value.trim()){input.focus();return;}if(hasPrivateInput(input.value)){input.setCustomValidity(privacyMessage);input.reportValidity();return;}input.setCustomValidity('');onSimulate?.(input.value.trim());});
   input.addEventListener('input',()=>input.setCustomValidity(''));

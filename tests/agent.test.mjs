@@ -58,7 +58,7 @@ test('the agent chooses source-discovered code IDs; invented IDs cannot create c
   if(u.pathname.includes('/CodesContent')){contentCalls++;assert.equal(u.searchParams.get('nodeId'),'real-node');return envelope({Docs:[{Id:'real-node',DocType:1,Title:'Residential uses',Content:'<p>Residential uses require approval under the conditions of this section.</p>'}]});}
   throw new Error('Unexpected request');
  };
- const session=createResearchSession(input,{read});await session.execute('resolve_location');const found=await session.execute('search_code_sections',{query:'residential uses'});
+ const session=createResearchSession(input,{read});await session.execute('interpret_concerns',{items:session.snapshot().goalItems.map(p=>({original_excerpt:p.text,label:p.text,kind:'goal',research_topic:'housing'}))});await session.execute('resolve_location');const found=await session.execute('search_code_sections',{query:'residential uses'});
  assert.deepEqual(session.toolDefinitions().find(t=>t.function.name==='read_code_sections').function.parameters.properties.section_ids.items.enum,[found.sections[0].section_id]);
  await assert.rejects(session.execute('read_code_sections',{section_ids:['invented']}));assert.equal(contentCalls,0);assert.equal(session.snapshot().code.length,0);
  assert.ok(session.requiredFollowUps().some(v=>v.startsWith('read_code_sections')));

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import {createResearchSession} from '../scripts/agent-tools.mjs';
-import {createScenarioAgent} from '../scripts/scenario-agent.mjs';
+import {createScenarioAgent} from './decision-fixtures.mjs';
 
 const points=[{lng:-95,lat:30},{lng:-94.999,lat:30},{lng:-94.999,lat:30.001},{lng:-95,lat:30.001}];
 const geometry=[[points.map(p=>[p.lng,p.lat]).concat([[-95,30]])]];

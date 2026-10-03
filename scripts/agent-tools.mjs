@@ -1,3 +1,6 @@
+import {goalItems,concernCoverage} from './concern-contract.mjs';
+import {sourceCompleteness,sourceInventory} from './source-completeness.mjs';
+import {studyView} from './study-context.mjs';
 import {parcelStudy} from './parcel-study.mjs';
 import {destinationSearch,destinationProperties} from './place-query.mjs';
 import {readNearbyPlaces,travelModes} from './place-routes.mjs';
@@ -19,11 +22,13 @@ const url=(base,params)=>`${base}?${new URLSearchParams(params)}`;
 const muni='https://library.municode.com/api';
 export function evidencePassages(source){
   const words=source.text.replace(/\s+/g,' ').trim().split(' '),passages=[];
-  for(let start=0;start<words.length;start+=100)passages.push({id:`${source.id}-p${passages.length+1}`,text:words.slice(start,start+120).join(' ')});
+  for(let start=0;start<words.length;start+=100)passages.push({id:`${source.id}-p${passages.length+1}`,text:words.slice(start,start+120).join(' '),wordRange:{start,end:Math.min(start+120,words.length)}});
   return passages;
 }
 const tool=(name,description,properties={},required=[])=>({type:'function',function:{name,description,parameters:{type:'object',properties,required,additionalProperties:false}}});
 export const researchTools=[
+  tool('interpret_concerns','First, separate EVERY original input into atomic concerns, including mixed types within the same sentence. Preserve the housing purpose. A goal, assertion, requirement and question are different. Use any research topic; never force questions into a preset list. Copy exact spans covering the original text.',{items:{type:'array',minItems:1,maxItems:32,items:{type:'object',additionalProperties:false,required:['original_excerpt','label','kind','research_topic'],properties:{original_excerpt:{type:'string',maxLength:600},label:{type:'string',maxLength:100},kind:{type:'string',enum:['goal','question','requirement','reported-fact']},research_topic:{type:'string',maxLength:100}}}}},['items']),
+  tool('read_source_passages','Read a bounded continuation from ANY retained source. Every source remains in the inventory. Inspect relevant exceptions and cross-references before a positive conclusion. Passage numbers start at one.',{source_id:{type:'string',maxLength:80},start_passage:{type:'integer',minimum:1,maximum:10000},count:{type:'integer',minimum:1,maximum:8}},['source_id','start_passage','count']),
   tool('read_site_context','Retrieve nearby mapped building footprints, explicit mapped heights, roads and amenities around the retained selected land. These are contextual OpenStreetMap features, not legal parcel/zoning or proof of vacancy/access. Choose this once early so the scene can develop while property research continues.',{radius_meters:{type:'integer',minimum:150,maximum:500}},[]),
   tool('read_nearby_places','Find mapped destinations and measure actual travel routes along streets and paths. Interpret any requested destination category or named place. Supply OSM filters for categories or name_query for named places; the legacy categories school/police/hospital/clinic/pharmacy/supermarket/bus_stop can omit filters. Choose walking/driving/cycling from the original concern. After a missing result, revise tag filters, name or radius using the evidence. Availability is not guaranteed. Default to walking if unspecified and state the mode. Checks up to three geographically nearby candidates and chooses the shortest successfully routed result; never claims complete nearest coverage. No straight-line fallback. Include the exact original excerpt. Police travel is not response time or safety.',{...destinationProperties,mode:{type:'string',enum:travelModes},radius_meters:{type:'integer',minimum:500,maximum:50000},original_excerpt:{type:'string',minLength:2,maxLength:600}},['kind','mode','radius_meters','original_excerpt']),
   tool('read_nearby_schools','Find mapped schools near the selected land and calculate the nearest result in a bounded search. Use early when a user asks about school proximity; include original_excerpt copied exactly from their priorities so the measured result can appear beside that concern while other research continues. Returns walking distance and route geometry along mapped streets/paths, with endpoint and search limitations. Never substitutes direct-line distance or establishes attendance assignment. May retry with a larger radius after no usable result.',{radius_meters:{type:'integer',minimum:500,maximum:50000},original_excerpt:{type:'string',minLength:2,maxLength:600}},['radius_meters']),
@@ -36,7 +41,7 @@ export const researchTools=[
   tool('read_code_sections','Retrieve original text for up to four section IDs returned by search/list tools. Returns source passage IDs for citation. You can follow up by retrieving another section.',{section_ids:{type:'array',items:{type:'string',maxLength:60},minItems:1,maxItems:4}},['section_ids']),
   tool('read_housing_context','Retrieve local ACS rental cost-burden and rent estimates, with geography, dates and uncertainty. These do not establish site demand.'),
   tool('discover_official_sources','Discover the selected authority and county websites from verified public directories. Use when catalogue/code access fails, or to find alternate original publications. Returns opaque IDs, never invented URLs.'),
-  tool('read_official_source','Read an official website or PDF, follow its returned link IDs, or inspect a linked parcel/zoning GIS service. Choose housing provisions and their exceptions. PDF page_start is a file page number, not a printed section number; at most four pages per call. Set kind only for a GIS link.',{source_id:{type:'string',maxLength:60},page_start:{type:'integer',minimum:1,maximum:3000},kind:{type:'string',enum:['parcel','zoning']}},['source_id']),
+  tool('read_official_source','Read an official website or PDF, follow its returned link IDs, or inspect a linked parcel/zoning GIS service. Choose housing provisions and their exceptions. PDF page_start is a file page number, not a printed section number; at most four pages per call. Set kind only for a GIS link.',{source_id:{type:'string',maxLength:60},page_start:{type:'integer',minimum:1,maximum:3000},include_evidence:{type:'boolean',description:'True for an original public document relevant to any concern beyond planning. Enables broader same-authority link navigation without promoting it to legal evidence.'},kind:{type:'string',enum:['parcel','zoning']}},['source_id']),
   tool('review_evidence','Inspect retrieved facts, conflicts, missing checks and available follow-up actions before writing the assessment. This performs no new lookups.'),
 ];
 export const progressLabels={resolve_location:'Identifying the local authority…',discover_map_sources:'Finding public property sources…',read_map_source:'Checking mapped property records…',read_planning_guidance:'Checking the authority’s development guidance…',search_code_sections:'Searching relevant housing provisions…',list_chapter_sections:'Reviewing the published development code…',read_code_sections:'Reading source provisions and exceptions…',read_housing_context:'Checking local housing needs…',review_evidence:'Reviewing evidence and remaining gaps…'};
@@ -51,8 +56,10 @@ export function validateToolArguments(name,args){
   for(const [k,value] of Object.entries(args)){
     const p=definition.properties[k];
     if(p.type==='string'&&(typeof value!=='string'||value.length>(p.maxLength??200)||value.length<(p.minLength??1)||p.enum&&!p.enum.includes(value)))throw new Error('Invalid tool argument');
+    if(name==='interpret_concerns'&&k==='items'){if(!Array.isArray(value)||!value.length||value.length>32||value.some(p=>!p||typeof p.original_excerpt!=='string'||!p.original_excerpt.trim()||p.original_excerpt.length>600||typeof p.label!=='string'||!p.label.trim()||p.label.length>100||typeof p.research_topic!=='string'||p.research_topic.length>100||!['goal','question','requirement','reported-fact'].includes(p.kind)))throw new Error('Invalid concern interpretation.');continue;}
     if(k==='filters'){destinationSearch(args);continue;}
     if(p.type==='array'&&(!Array.isArray(value)||value.length<p.minItems||value.length>p.maxItems||value.some(v=>typeof v!=='string'||!v||v.length>p.items.maxLength)))throw new Error('Invalid tool argument');
+    if(p.type==='boolean'&&typeof value!=='boolean')throw new Error('Invalid tool argument');
     if(p.type==='integer'&&(!Number.isSafeInteger(value)||value<p.minimum||value>p.maximum))throw new Error('Invalid tool argument');
   }
   if(name==='read_nearby_places'){
@@ -73,7 +80,8 @@ export function validateToolArguments(name,args){
 // change the location, fabricate a source, or promote its prose into a record.
 export function createResearchSession(input,{read=createEvidenceClient(),webRead=createPublicWebClient(),readHeights=readOvertureHeights,now=Date.now,signal}={}){
   const selected=selectedGeometry(input.points);
-  const state={schemaVersion:2,caseId:digest(input.points).slice(0,20),generatedAt:new Date(now()).toISOString(),status:'partial',evidenceStatus:'retrieved-records',selectedArea:{geometry:selected,squareMeters:multiArea(selected)},locality:null,parcel:null,parcelCandidates:[],zones:[],housing:null,sources:[],gaps:[],code:[],assessment:null,checks:[],capacity:null,codeAccess:[],planningSystem:{type:'unresolved',sources:[],codeLinks:[]}};
+  const inputs=goalItems(input.priorities??{});if(!inputs.length)inputs.push({id:'input-housing',text:'Explore housing possibilities'});
+  const state={goalItems:inputs,concernBrief:null,coverageMap:[],schemaVersion:2,caseId:digest(input.points).slice(0,20),generatedAt:new Date(now()).toISOString(),status:'partial',evidenceStatus:'retrieved-records',selectedArea:{geometry:selected,squareMeters:multiArea(selected)},locality:null,parcel:null,parcelCandidates:[],zones:[],housing:null,sources:[],gaps:[],code:[],assessment:null,checks:[],capacity:null,codeAccess:[],planningSystem:{type:'unresolved',sources:[],codeLinks:[]}};
   const sourceRead=(target,options={})=>read(target,{...options,signal});
   const layers=new Map(),sections=new Map(),chapters=new Map(),checks=new Map();
   const discoveredKinds=new Set(),regionalKinds=new Set();
@@ -86,7 +94,8 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
   const recordFailure=(name,url,error)=>{const f={name,url,...sourceFailure(error)};if(!state.retrievalFailures.some(e=>e.name===name&&e.url===url))state.retrievalFailures.push(f);};
   const linkedRead=async(target,options={})=>{const r=await webRead(target,{...options,signal});const data=JSON.parse(Buffer.from(r.data).toString('utf8'));if(data.error)throw new Error('Source query failed');return {...r,data};};
   const published=()=>publishedCodes??=createPublishedCodeSession(sourceRead,state.locality);
-  const addSource=s=>{const at=state.sources.findIndex(v=>v.id===s.id);if(at<0)state.sources.push(s);else state.sources[at]=s;};
+  const requestedPassages=new Map();
+  const addSource=s=>{s={...s,completeness:sourceCompleteness(s)};const at=state.sources.findIndex(v=>v.id===s.id);if(at<0)state.sources.push(s);else state.sources[at]=s;};
   const requireLocal=()=>{if(!state.locality)throw new Error('Resolve the selected location first');};
   const catalog=async()=>{
     requireLocal();if(state.locality.boundaryUncertain)throw new Error('Jurisdiction must be confirmed before code retrieval');
@@ -151,9 +160,10 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
     result.caseId=digest({points:input.points,parcel:result.parcel?.key,sources:result.sources.map(s=>({id:s.id,url:s.url,hash:s.hash})).sort((a,b)=>a.id.localeCompare(b.id))}).slice(0,20);return result;
   };
   const requiredFollowUps=()=>{
-    if(!state.locality)return [...(locationAttempts<2?['resolve_location']:[]),...(!completed.has('read_site_context')?['read_site_context']:[])];
-    if(state.parcelCandidates.length&&!state.parcel)return completed.has('read_site_context')?[]:['read_site_context'];
-    const required=[];
+    const concernMissing=state.concernBrief?[]:['interpret_concerns: represent every original input and distinct concern before completing findings'];
+    if(!state.locality)return [...concernMissing,...(locationAttempts<2?['resolve_location']:[]),...(!completed.has('read_site_context')?['read_site_context']:[])];
+    if(state.parcelCandidates.length&&!state.parcel)return [...concernMissing,...(completed.has('read_site_context')?[]:['read_site_context'])];
+    const required=[...concernMissing];
     if(!completed.has('read_site_context'))required.push('read_site_context: retrieve surrounding buildings and streets for the selected land before finishing');
     if(!discoveredKinds.has('parcel'))required.push('discover_map_sources: discover parcel sources');
     for(const kind of ['parcel','zoning']){
@@ -183,11 +193,22 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
     return required;
   };
   const context=()=>{
-    const r=snapshot();let chars=0;
-    return {siteContext:{status:r.siteContext.status,version:r.siteContext.version,geometryVersion:r.siteContext.geometryVersion,buildingCount:r.siteContext.buildings.length,roadCount:r.siteContext.roads.length,coverage:r.siteContext.coverage},priorityMeasurements:r.priorityMeasurements,officialRecovery:officialPages?.progress()??null,codeAccess:r.codeAccess,status:r.status,assessmentScope:r.assessmentScope,locality:r.locality,selectedSquareMeters:r.selectedArea.squareMeters,parcel:r.parcel?{id:r.parcel.id,address:r.parcel.address,mappedSquareMeters:r.parcel.mappedSquareMeters,attributes:r.parcel.attributes,members:r.parcel.members?.map(p=>({id:p.id,key:p.key,address:p.address,attributes:p.attributes,selectedOverlapSquareMeters:p.overlapSquareMeters})),studyCollection:r.parcel.studyCollection,controlStatus:r.parcel.controlStatus}:null,spatial:r.spatial,parcelCandidates:r.parcelCandidates.map(p=>({id:p.id,key:p.key,address:p.address})),zoning:r.zones.map(z=>({id:z.id,description:z.description})),planningSystem:r.planningSystem.type,regulatoryPath:regulatoryPath(r),housing:r.housing,unresolved:r.gaps,checks:r.checks,completedTools:[...completed],requiredFollowUps:requiredFollowUps(),sources:r.sources.filter(s=>['code-provision','planning-guidance','mapped-record'].includes(s.kind)).filter(s=>{chars+=s.text.length;return chars<=65000;}).map(s=>({id:s.id,title:s.title,context:s.context,url:s.url,publication:s.publication,truncated:s.truncated,scopeConflict:s.scopeConflict,tableDistricts:s.tableDistricts,passages:evidencePassages(s)})),availableMapSources:[...layers].map(([source_id,l])=>({source_id,kind:l.kind,title:l.item.title,lastOutcome:sourceAttempts.get(source_id)??'not-queried'}))};
+    const r=snapshot();
+    return {goalItems:r.goalItems,concernBrief:r.concernBrief,coverageMap:r.coverageMap,siteContext:{status:r.siteContext.status,version:r.siteContext.version,geometryVersion:r.siteContext.geometryVersion,buildingCount:r.siteContext.buildings.length,roadCount:r.siteContext.roads.length,coverage:r.siteContext.coverage},priorityMeasurements:studyView(r.priorityMeasurements),officialRecovery:officialPages?.progress()??null,codeAccess:r.codeAccess,status:r.status,assessmentScope:r.assessmentScope,locality:r.locality,selectedSquareMeters:r.selectedArea.squareMeters,parcel:r.parcel?{id:r.parcel.id,address:r.parcel.address,mappedSquareMeters:r.parcel.mappedSquareMeters,attributes:r.parcel.attributes,members:r.parcel.members?.map(p=>({id:p.id,key:p.key,address:p.address,attributes:p.attributes,selectedOverlapSquareMeters:p.overlapSquareMeters})),studyCollection:r.parcel.studyCollection,controlStatus:r.parcel.controlStatus}:null,spatial:r.spatial,parcelCandidates:r.parcelCandidates.map(p=>({id:p.id,key:p.key,address:p.address})),zoning:r.zones.map(z=>({id:z.id,description:z.description})),planningSystem:r.planningSystem.type,regulatoryPath:regulatoryPath(r),housing:r.housing,unresolved:r.gaps,checks:r.checks,completedTools:[...completed],requiredFollowUps:requiredFollowUps(),sources:sourceInventory(r.sources,evidencePassages,requestedPassages),availableMapSources:[...layers].map(([source_id,l])=>({source_id,kind:l.kind,title:l.item.title,lastOutcome:sourceAttempts.get(source_id)??'not-queried'}))};
   };
   const execute=async(name,args={})=>{
     validateToolArguments(name,args);signal?.throwIfAborted();completed.add(name);
+    if(name==='interpret_concerns'){
+      const interpreted=args.items.map((p,i)=>({id:'priority-'+i,originalExcerpt:p.original_excerpt,label:p.label,kind:p.kind,researchTopic:p.research_topic}));
+      if(interpreted.some(p=>!inputs.some(item=>item.text.includes(p.originalExcerpt))))throw new Error('Each concern must quote an exact original span.');
+      const coverage=concernCoverage(inputs,interpreted);state.concernBrief=interpreted;state.coverageMap=coverage;return {status:'interpreted',concerns:interpreted,coverageMap:coverage};
+    }
+    if(name==='read_source_passages'){
+      const source=state.sources.find(s=>s.id===args.source_id);if(!source)throw new Error('Choose a retained source ID.');
+      const all=evidencePassages(source),passages=all.slice(args.start_passage-1,args.start_passage-1+args.count);if(!passages.length)throw new Error('Choose an available passage range.');
+      const ids=requestedPassages.get(source.id)??new Set(all.slice(0,2).map(p=>p.id));for(const p of passages){ids.delete(p.id);ids.add(p.id);}requestedPassages.set(source.id,new Set([...ids].slice(-8)));
+      return {status:'retrieved',sourceId:source.id,completeness:sourceCompleteness(source),passages,passageCount:all.length,nextPassage:args.start_passage+passages.length<=all.length?args.start_passage+passages.length:null};
+    }
     if(name==='resolve_location'){
       if(locationAttempts>=2)return {status:'unavailable',note:'Location retry budget exhausted. No substitute location may be used.'};locationAttempts++;
       const found=await locate(sourceRead,input.points);if(!found){checks.set('Jurisdiction','unavailable');return {status:'unavailable',coverage:'Connected geographic lookup covers U.S. jurisdictions. Do not substitute a city.'};}
@@ -218,7 +239,7 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
       const result=await official().discover();for(const f of result.failures)if(!state.retrievalFailures.some(e=>e.url===f.url))state.retrievalFailures.push({name:'Official website discovery',...f});return result;
     }
     if(name==='read_official_source'){
-      const result=await official().inspect(args.source_id,args.page_start??1);
+      const result=await official().inspect(args.source_id,args.page_start??1,args.include_evidence===true);
       if(result.mapSource){
         if(!args.kind)return {status:'kind-needed',note:'This is a mapped service. Choose kind parcel or zoning according to the link and service metadata.'};
         const e=result.mapSource;
@@ -293,11 +314,11 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
         const entry=sections.get(id);if(!entry)throw new Error('Choose section IDs returned by code search or chapter listing');
         const response=await sourceRead(url(`${muni}/CodesContent`,{productId:entry.product.ProductID,jobId:entry.job.Id,nodeId:entry.node,groupChunks:'false'}));
         for(const doc of response.data.Docs??[]){
-          if(doc.DocType!==1||!doc.Content||state.code.length>=10)continue;
+          if(doc.DocType!==1||!doc.Content)continue;
           const $=load(doc.Content);$('script,style').remove();$('tr').each((_,row)=>{const cells=$(row).find('th,td').map((_,cell)=>$(cell).text().replace(/\s+/g,' ').trim()).get();$(row).replaceWith($('<p>').text(cells.join(' | ')));});
           const full=$.text().replace(/\s+/g,' ').trim();if(full.length<50)continue;
           const sourceId=`code-${digest(`${entry.product.ProductID}:${doc.Id}`).slice(0,16)}`;
-          const source={id:sourceId,kind:'code-provision',title:plain(doc.Title),context:entry.context,section:plain(doc.Title),publisher:`${entry.client.ClientName} · ${entry.product.ProductName}`,url:`https://library.municode.com/${state.locality.stateAbbr.toLowerCase()}/${encodeURIComponent(entry.client.ClientName.toLowerCase().replaceAll(' ','_'))}/codes/${encodeURIComponent(entry.product.ProductName.toLowerCase().replaceAll(' ','_'))}?nodeId=${encodeURIComponent(doc.Id)}`,queryUrl:response.url,hash:response.hash,retrievedAt:response.retrievedAt,text:full.slice(0,14000),truncated:full.length>14000,publication:plain(entry.job.BannerText),amendmentsPending:doc.IsAmended===true||(doc.AmendedBy?.length??0)>0};
+          const source={id:sourceId,kind:'code-provision',title:plain(doc.Title),context:entry.context,section:plain(doc.Title),publisher:`${entry.client.ClientName} · ${entry.product.ProductName}`,url:`https://library.municode.com/${state.locality.stateAbbr.toLowerCase()}/${encodeURIComponent(entry.client.ClientName.toLowerCase().replaceAll(' ','_'))}/codes/${encodeURIComponent(entry.product.ProductName.toLowerCase().replaceAll(' ','_'))}?nodeId=${encodeURIComponent(doc.Id)}`,queryUrl:response.url,hash:response.hash,retrievedAt:response.retrievedAt,text:full,truncated:false,publication:plain(entry.job.BannerText),amendmentsPending:doc.IsAmended===true||(doc.AmendedBy?.length??0)>0};
           addSource(source);if(!state.code.includes(sourceId))state.code.push(sourceId);result.push({id:sourceId,title:source.title,context:source.context,publication:source.publication,truncated:source.truncated,passages:evidencePassages(source)});
         }
       }
@@ -307,8 +328,8 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
   };
   const toolDefinitions=()=>researchTools.flatMap(definition=>{
     const t=structuredClone(definition),name=t.function.name,properties=t.function.parameters.properties;
-    const ids=name==='read_map_source'?[...layers.keys()]:name==='read_official_source'?(officialPages?.choices().map(e=>e.source_id)??[]):name==='read_code_sections'?[...sections.keys(),...(publishedCodes?.ids()??[])]:name==='list_chapter_sections'?[...chapters.keys()]:null;
-    if(ids){if(!ids.length)return [];if(name==='read_code_sections')properties.section_ids.items.enum=ids;else properties[name==='read_map_source'||name==='read_official_source'?'source_id':'chapter_id'].enum=ids;}
+    const ids=name==='read_source_passages'?state.sources.map(s=>s.id):name==='read_map_source'?[...layers.keys()]:name==='read_official_source'?(officialPages?.choices().map(e=>e.source_id)??[]):name==='read_code_sections'?[...sections.keys(),...(publishedCodes?.ids()??[])]:name==='list_chapter_sections'?[...chapters.keys()]:null;
+    if(ids){if(!ids.length)return [];if(name==='read_code_sections')properties.section_ids.items.enum=ids;else properties[name==='read_source_passages'||name==='read_map_source'||name==='read_official_source'?'source_id':'chapter_id'].enum=ids;}
     if(name==='read_map_source'){
       const fields=[...new Set([...layers.values()].flatMap(l=>l.identifierField?[l.identifierField]:l.identifierFields.map(f=>f.name)).filter(Boolean))];
       if(fields.length)properties.identifier_field.enum=fields;else delete properties.identifier_field;
@@ -318,5 +339,5 @@ export function createResearchSession(input,{read=createEvidenceClient(),webRead
   });
   const toolCacheKey=(name,args)=>name==='resolve_location'?String(locationAttempts):name==='read_map_source'&&layers.get(args.source_id)?.kind==='zoning'?(state.parcel?.key??'selected-area'):'';
   const toolLane=(name,args)=>name==='resolve_location'||name==='review_evidence'?'exclusive':name==='read_map_source'?'geometry':/code|chapter/.test(name)?'code':/official/.test(name)?'official':name==='discover_map_sources'?'discovery-'+args.kind:name==='read_site_context'?'site-context':['read_nearby_schools','read_nearby_places'].includes(name)?'nearby-places':name;
-  return {execute,snapshot,context,requiredFollowUps,toolDefinitions,toolCacheKey,toolLane,addPriorityTexts:values=>{for(const value of values)if(typeof value==='string'&&value.length<=600&&priorityTexts.size<32)priorityTexts.add(value);},renewSignal:next=>{signal=next;officialPages?.renewSignal?.(next);}};
+  return {execute,snapshot,context,requiredFollowUps,toolDefinitions:()=>state.concernBrief?toolDefinitions().filter(t=>t.function.name!=='interpret_concerns'):researchTools.filter(t=>t.function.name==='interpret_concerns'),toolCacheKey,toolLane,addPriorityTexts:values=>{for(const value of values)if(typeof value==='string'&&value.length<=600&&priorityTexts.size<32)priorityTexts.add(value);},renewSignal:next=>{signal=next;officialPages?.renewSignal?.(next);}};
 }

@@ -48,7 +48,7 @@ test('exact source quotations required; invented references and generated home c
 });
 test('deduplication shares the agent run and changed inputs can start fresh research',async()=>{
  let calls=0;const base=options();const review=createFindingsService({...base,fetchImpl:async(...args)=>{calls++;return base.fetchImpl(...args);}});
- const [a,b]=await Promise.all([review(input()),review(input())]);assert.equal(a.narrativeStatus,'ready');assert.deepEqual(a,b);assert.equal(calls,2);await review(input());assert.equal(calls,2);
+ const [a,b]=await Promise.all([review(input()),review(input())]);assert.equal(a.narrativeStatus,'ready');assert.equal(b.execution.action,'rejoined');assert.deepEqual({...a,execution:undefined},{...b,execution:undefined});assert.equal(calls,2);await review(input());assert.equal(calls,2);
  assert.equal((await review({...input(),query:'Changed input'})).narrativeStatus,'ready');assert.equal(calls,4);
 });
 test('ambiguous parcels or unstable jurisdiction never receive a ready site assessment',async()=>{
@@ -135,7 +135,7 @@ test('a late subscriber receives acquired evidence immediately and a later model
  const first=review(input());await waiting;
  const second=review(input(),{onProgress:e=>progress.push(e)});
  assert.equal(progress[0].evidence.parcel.id,'parcel-A');release();
- const [a,b]=await Promise.all([first,second]);assert.deepEqual(a,b);assert.equal(a.parcel.id,'parcel-A');assert.equal(a.narrativeStatus,'unavailable');assert.equal(turn,2);
+ const [a,b]=await Promise.all([first,second]);assert.equal(b.execution.action,'rejoined');assert.deepEqual({...a,execution:undefined},{...b,execution:undefined});assert.equal(a.parcel.id,'parcel-A');assert.equal(a.narrativeStatus,'unavailable');assert.equal(turn,2);
 });
 
 test('one incomplete model response can recover from retained evidence without executing its unfinished tools',async()=>{

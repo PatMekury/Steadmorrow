@@ -39,7 +39,7 @@ export function documentSource({text,title,url,hash,retrievedAt,scope,publisher,
   const toc=/table of contents/i.test(content.slice(0,400))&&!operative;
   if(toc)return null;
   const kind=scope==='authority'&&legal&&section&&operative&&!uncertain?'code-provision':'planning-guidance';
-  return {id:`official-${digest(url+':'+(page??'html')).slice(0,20)}`,kind,title:page?`${title} · PDF page ${page}`:title,section:page?`PDF page ${page}`:null,url:page?url+`#page=${page}`:url,hash,retrievedAt,publisher,text:content.slice(0,16000),truncated:truncated||content.length>16000,authorityProof:proof,publication:'Publication currency and later amendments require confirmation.',scope};
+  return {id:`official-${digest(url+':'+(page??'html')).slice(0,20)}`,kind,title:page?`${title} · PDF page ${page}`:title,section:page?`PDF page ${page}`:null,url:page?url+`#page=${page}`:url,hash,retrievedAt,publisher,text:content,page,truncated,authorityProof:proof,publication:'Publication currency and later amendments require confirmation.',scope};
 }
 export function createOfficialSession({locality,read,webRead=createPublicWebClient(),pdf=readPdf,signal}={}){
   const entries=new Map(),failures=[],visited=new Set(),outcomes=new Map(),reads=new Map();let discovered=false;
@@ -55,7 +55,7 @@ export function createOfficialSession({locality,read,webRead=createPublicWebClie
     }
     return {sources:choices(),failures,note:'Choose an official source ID and follow its published navigation. Directory matches establish a publisher, not legal applicability. No matching directory entry does not prove no website exists.'};
   };
-  const inspectPage=async(id,start=1)=>{
+  const inspectPage=async(id,start=1,includeEvidence=false)=>{
     const entry=entries.get(id);if(!entry)throw new Error('Choose an official source ID returned by discovery');visited.add(id);
     if(gis(entry.url))return {status:'gis-source',mapSource:entry};
     try{
@@ -87,7 +87,7 @@ export function createOfficialSession({locality,read,webRead=createPublicWebClie
       $('a[href],iframe[src]').each((_,node)=>{
         if(count>=1000)return;count++;const label=tidy($(node).text()||$(node).attr('title')),href=$(node).attr('href')||$(node).attr('src');let target;
         try{target=webUrl(new URL(href,linkBase).href.replace(/^http:/,'https:'));}catch{return;}
-        const u=new URL(target),origin=new URL(response.url);const authorityLink=entry.scope==='county'&&(matchesAuthority(label,locality)||key(label)===key(locality.authority?.base));const pathHint=u.pathname.replace(/departments(?:_and_officials)?/gi,'');const matching=authorityLink||topics.test(label+' '+pathHint)||/^departments$/i.test(label)||gis(target)||directory(target);
+        const u=new URL(target),origin=new URL(response.url);const authorityLink=entry.scope==='county'&&(matchesAuthority(label,locality)||key(label)===key(locality.authority?.base));const pathHint=u.pathname.replace(/departments(?:_and_officials)?/gi,'');const matching=includeEvidence||authorityLink||topics.test(label+' '+pathHint)||/^departments$/i.test(label)||gis(target)||directory(target);
         if(!matching||/^skip to/i.test(label)||skip.test(label+' '+u.pathname)||/\.(zip|docx?|xlsx?|png|jpe?g|mp4)$/i.test(u.pathname))return;
         const baseHost=origin.hostname.split('.').slice(-2).join('.');
         const same=u.hostname===origin.hostname||u.hostname.endsWith('.'+origin.hostname.replace(/^www\./,''))||(!/civicplus|arcgis|revize|google|amazonaws/.test(baseHost)&&(u.hostname===baseHost||u.hostname.endsWith('.'+baseHost)));
@@ -102,14 +102,14 @@ export function createOfficialSession({locality,read,webRead=createPublicWebClie
       const title=tidy($('h1').first().text()||$('title').text()||entry.title);
       main.find('h1,h2,h3,h4,p,div,li,section').append(' ');const text=main.text();
       const relevant=/planning|zoning|ordinance|housing|land.use|regulation|development.code/i.test(title)&&!skip.test(title);
-      const source=relevant?documentSource({...base,title,text}):null;
+      const source=relevant||includeEvidence?documentSource({...base,title,text}):null;if(source&&!relevant)source.kind='public-record';
       const unique=[...new Map(links.map(l=>[l.source_id,l])).values()];unique.sort((a,b)=>Number(/zoning|ordinance|land.use|development.reg|chapter/i.test(b.title))-Number(/zoning|ordinance|land.use|development.reg|chapter/i.test(a.title)));
       return {status:source?'retrieved':unique.length?'navigation':'irrelevant',sources:source?[source]:[],links:unique.slice(0,50).map(({proof,...l})=>l),truncated:unique.length>50,note:'Follow original code links for operative provisions. A guidance page or table of contents is not permission to build. Publication currency remains unverified.'};
     }catch(e){const failure={url:entry.url,...sourceFailure(e)};failures.push(failure);return {...failure,sources:[],alternatives:choices().filter(e=>!e.read).slice(0,12)};}
   };
-  const inspect=async(id,start=1)=>{
-    const key=id+':'+start;if(reads.has(key))return {...structuredClone(await reads.get(key)),reused:true,note:'This source/page has already been attempted in this investigation. Choose another relevant unread source or a different unread PDF page.'};
-    const task=inspectPage(id,start).then(r=>{
+  const inspect=async(id,start=1,includeEvidence=false)=>{
+    const key=id+':'+start+':'+includeEvidence;if(reads.has(key))return {...structuredClone(await reads.get(key)),reused:true,note:'This source/page has already been attempted in this investigation. Choose another relevant unread source or a different unread PDF page.'};
+    const task=inspectPage(id,start,includeEvidence).then(r=>{
       const outcome=r.sources?.some(s=>s.kind==='code-provision')?'operative':r.sources?.length?'guidance':r.status==='navigation'?'navigation-only':r.status;
       outcomes.set(id,outcome);return {...r,outcome};
     });reads.set(key,task);return structuredClone(await task);
