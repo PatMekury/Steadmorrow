@@ -90,6 +90,19 @@ test('a revise verdict cannot be selected and remains reviewable after the bound
  },(s,p)=>{assert.ok(p.tools.some(t=>t.function.name==='select_layout'));return ['select_layout',select(s)];}],{optionCount:3,optionAuditor:async()=>({accepted:true})});
  const result=await m.run({assessmentVersion:ref});assert.equal(result.status,'no-fit');assert.equal(result.concept.metrics.homes,0);
 });
+test('when all judgments are complete the last calls are reserved for actual selection',async()=>{
+ const entry=makeEntry();let n=0;
+ const run=createScenarioAgent({optionCount:3,resolveContext:()=>entry,reserve:()=>()=>{},optionAuditor:async()=>({accepted:true}),fetchImpl:async(_,request)=>{
+  n++;const body=JSON.parse(request.body),s=JSON.parse(body.input[0].content);
+  if(n===1)return response('interpret_priorities',{items:[purpose]},n);
+  if(n===2)return response('plan_housing_options',{options:[option]},n);
+  if(n===3)return response('test_layout',{...params,option_id:'option-1'},n);
+  if(n===4)return response('review_layout',judgment(s),n);
+  if(n<29)return Response.json({status:'incomplete',output:[]});
+  assert.deepEqual(body.tools.map(t=>t.function.name),['select_layout']);return response('select_layout',select(s),n);
+ }});
+ const result=await run({assessmentVersion:ref});assert.equal(n,29);assert.equal(result.status,'illustrative');assert.equal(result.research.modelCalls,30);
+});
 
 test('mixed clauses and more than four concerns are covered without a preset research taxonomy',async()=>{
  const matters='Keep the hall and check community restrictions; compare shadow effects; check construction noise; check tree loss; check service capacity';

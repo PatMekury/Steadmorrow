@@ -1,5 +1,17 @@
 // Model-facing projection only. Never use this to replace renderer/evidence state.
 // Sources, exact excerpts, measurements and qualifications remain intact.
+import {createHash} from 'node:crypto';
+// A layout critique depends on this proposal's canonical measurements, not on
+// prose being rewritten to describe a different alternative. Other factual
+// answers, the original concern and any cited source support remain dependencies.
+export function priorityReviewVersion(brief,conceptId){
+  const basis=(brief??[]).map(p=>{
+    const answer=p.answer;
+    if(p.measurementNeeded!=='proposal-surroundings'||!answer?.receipts?.some(r=>r.kind==='surroundings-effects'))return p;
+    return {...p,answer:{status:answer.status,support:answer.support,receipts:answer.receipts.filter(r=>r.kind!=='surroundings-effects'||r.conceptId===conceptId)}};
+  });
+  return createHash('sha256').update(JSON.stringify(basis)).digest('hex').slice(0,20);
+}
 const displayArrays=new Set(['streets','buildings','roads','parking','maneuver']);
 export function studyView(value){
   if(Array.isArray(value))return value.map(studyView);
@@ -99,14 +111,15 @@ export function studyFailure(error){
 }
 
 export function studyCompletionChecks({options,concepts,reviews,priorityStateVersion,hasSelectedEffects}){
+  const version=c=>typeof priorityStateVersion==='function'?priorityStateVersion(c):priorityStateVersion;
   const optionsNeedingTests=[],optionsNeedingCurrentCritique=[],optionsNeedingEffects=[],selectionChoices=[];
   for(const option of options??[]){
     if(option.useStatus==='unresolved')continue;
     const tests=concepts.filter(c=>c.optionId===option.id),placed=tests.filter(c=>c.buildings.length);
     const candidates=placed.length?placed:tests;
-    for(const c of candidates){const r=reviews.get(c.id);if(r?.priorityStateVersion===priorityStateVersion&&r.verdict===(c.buildings.length?'ready-to-compare':'unresolved'))selectionChoices.push({optionId:option.id,conceptId:c.id,reviewId:r.id,status:c.status,canRecommend:hasSelectedEffects(c)});}
+    for(const c of candidates){const r=reviews.get(c.id);if(r?.priorityStateVersion===version(c)&&r.verdict===(c.buildings.length?'ready-to-compare':'unresolved'))selectionChoices.push({optionId:option.id,conceptId:c.id,reviewId:r.id,status:c.status,canRecommend:hasSelectedEffects(c)});}
     if(!tests.length){optionsNeedingTests.push({id:option.id,typology:option.typology});continue;}
-    if(!candidates.some(c=>{const r=reviews.get(c.id);return r?.priorityStateVersion===priorityStateVersion&&r.verdict===(c.buildings.length?'ready-to-compare':'unresolved');})){
+    if(!candidates.some(c=>{const r=reviews.get(c.id);return r?.priorityStateVersion===version(c)&&r.verdict===(c.buildings.length?'ready-to-compare':'unresolved');})){
       optionsNeedingCurrentCritique.push({optionId:option.id,candidateConceptIds:candidates.map(c=>c.id),instruction:'Choose and review ONE useful test version for this option. Earlier failures stay in history; they do not all need new reviews.'});
     }
     if(placed.length&&!placed.some(hasSelectedEffects))optionsNeedingEffects.push({optionId:option.id,candidateConceptIds:placed.map(c=>c.id),instruction:'Measure the version you intend to select, then cite its receipt. Superseded tests do not all need effects checks.'});

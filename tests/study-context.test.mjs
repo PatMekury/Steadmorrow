@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {studyView,studyMessageView,studyExchangeView,studyCompletionChecks,studyFailure,studyUpstreamError} from '../scripts/study-context.mjs';
+import {studyView,studyMessageView,studyExchangeView,studyCompletionChecks,priorityReviewVersion,studyFailure,studyUpstreamError} from '../scripts/study-context.mjs';
+test('another option measurement does not invalidate a critique of unchanged evidence',()=>{
+ const brief=[{id:'p',originalExcerpt:'Effects on neighbors',measurementNeeded:'proposal-surroundings',answer:{status:'partial',headline:'First proposal',support:[],unresolvedChecks:['Further checks remain.'],receipts:[{kind:'surroundings-effects',id:'a',conceptId:'first',structures:[{gap:5}],limitations:['Height estimated.']}]}},{id:'route',answer:{status:'partial',distanceMeters:700}}];
+ const version=priorityReviewVersion(brief,'first'),changed=structuredClone(brief);
+ changed[0].answer.headline='Second proposal';changed[0].answer.receipts.push({kind:'surroundings-effects',id:'b',conceptId:'second',structures:[{gap:8}]});
+ assert.equal(priorityReviewVersion(changed,'first'),version);
+ assert.notEqual(priorityReviewVersion(changed,'second'),priorityReviewVersion(brief,'second'));
+ for(const mutate of [b=>b[0].answer.receipts[0].structures[0].gap=3,b=>b[0].answer.receipts[0].limitations.push('Additional uncertainty'),b=>b[0].answer.support.push({sourceId:'new-rule'}),b=>b[0].originalExcerpt='Effects on church and neighbors',b=>b[1].answer.distanceMeters=800]){
+  const next=structuredClone(brief);mutate(next);assert.notEqual(priorityReviewVersion(next,'first'),version);
+ }
+});
 import {createScenarioAgent} from '../scripts/scenario-agent.mjs';
 
 test('completion asks for a selected version per option, not new reviews and effects for every abandoned attempt',()=>{
