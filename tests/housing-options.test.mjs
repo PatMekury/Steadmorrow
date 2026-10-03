@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createScenarioAgent} from './decision-fixtures.mjs';
-import {calculateConcept} from '../scripts/scenario-geometry.mjs';
+import {calculateConcept,describeStudyShape} from '../scripts/scenario-geometry.mjs';
 import {parcelStudy} from '../scripts/parcel-study.mjs';
 import {activateHousingOption,matchingSavedScenario} from '../findings-session.js';
 import {multiArea,overlapArea} from '../scripts/site-geometry.mjs';
@@ -11,6 +11,15 @@ const quote='Residential dwellings are permitted subject to development approval
 const source={id:'local-use',kind:'code-provision',title:'Residential uses',text:quote,passages:[{id:'p1',text:quote}]};
 const evidence={caseId:'b'.repeat(20),parcel:{key:'p',id:'p',geometry:rect(0,0,80,60)},selectedArea:{geometry:rect(0,0,80,60)},locality:{city:'Fixture'},sources:[source],siteContext:{geometryVersion:'c'.repeat(20),buildings:[]}};
 const base={width:6,depth:9,storeys:2,storey_height:3,spacing:3,edge_clearance:2,angle:0,homes:4,parking_spaces:1};
+
+test('planning dimensions retain each parcel intersection instead of suggesting one combined building span',()=>{
+ const selected=rect(0,0,40,16),members=[{id:'west',key:'w',geometry:rect(0,0,20,16)},{id:'east',key:'e',geometry:rect(20,0,20,16)}];
+ const e={selectedArea:{geometry:selected},parcel:parcelStudy(members,selected).parcel};const before=structuredClone(e),shape=describeStudyShape(e);
+ assert.deepEqual(e,before);assert.equal(shape.parcelIntersections.length,2);
+ assert.equal(Math.max(...shape.enclosingFrames.flatMap(f=>[f.widthMeters,f.depthMeters])),40);
+ for(const p of shape.parcelIntersections){assert.equal(Math.max(...p.enclosingFrames.flatMap(f=>[f.widthMeters,f.depthMeters])),20);assert.equal(p.selectedParcelIntersectionSquareMeters,320);}
+ assert.match(shape.note,/ONE parcelIntersections/);
+});
 const options=[1,2,3].map(i=>({id:'option-'+i,title:['Detached cluster','Compact cottages','Supportive cottages'][i-1],typology:'detached',housing_model:i===3?'supportive':'independent',use_status:'conditional',applicability:'Residential exploration is conditional on local development approval; supportive services and affordability delivery remain unverified.',dimension_basis:'A compact footprint leaves room around the buildings.',support:[{sourceId:source.id,passageId:'p1'}]}));
 test('three options require source review and three distinct reviewed arrangements before selection',async()=>{
  const entry={input:{priorities:{purpose:'Affordable housing',matters:'',choices:[]}},result:{housingRoute:'supported'},session:{snapshot:()=>structuredClone(evidence),context:()=>structuredClone(evidence),toolDefinitions:()=>[],renewSignal(){}}};

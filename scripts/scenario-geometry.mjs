@@ -166,14 +166,24 @@ export function calculateConcept(evidence,input){
 
 // Measured outline proportions help the agent choose dimensions. These are
 // enclosing rectangles, not guaranteed empty space or legal buildable envelopes.
-export function describeStudyShape(evidence){
-  const geometry=clipping.intersection(evidence.selectedArea.geometry,evidence.parcel?.geometry??evidence.selectedArea.geometry);
+function outlineMeasures(geometry){
   if(!geometry.length)return null;
   const origin=geometry[0][0][0],mx=111195*Math.cos(origin[1]*Math.PI/180);
   const local=map(geometry,([x,y])=>[(x-origin[0])*mx,(y-origin[1])*111195]);
   const points=local.flat(2),edges=local.flatMap(p=>p[0].slice(1).map((b,i)=>{const a=p[0][i];return {length:Math.hypot(b[0]-a[0],b[1]-a[1]),angle:Math.atan2(b[1]-a[1],b[0]-a[0])};})).sort((a,b)=>b.length-a.length);
   const frames=edges.slice(0,4).map(e=>{const c=Math.cos(e.angle),s=Math.sin(e.angle),xs=points.map(([x,y])=>x*c+y*s),ys=points.map(([x,y])=>-x*s+y*c);return {angleDegrees:Math.round(((e.angle*180/Math.PI)%180+180)%180*10)/10,widthMeters:Math.round((Math.max(...xs)-Math.min(...xs))*10)/10,depthMeters:Math.round((Math.max(...ys)-Math.min(...ys))*10)/10};});
-  return {mappedStreetFrontage:streetFrontage(evidence),selectedParcelIntersectionSquareMeters:Math.round(area(local)*10)/10,edgeLengthsMeters:edges.map(e=>Math.round(e.length*10)/10),enclosingFrames:frames,note:'Enclosing dimensions only. Corners, taper, holes, individual parcel boundaries, mapped buildings and chosen edge clearances further constrain a footprint. Do not choose dimensions from land area alone.'};
+  return {selectedParcelIntersectionSquareMeters:Math.round(area(local)*10)/10,edgeLengthsMeters:edges.map(e=>Math.round(e.length*10)/10),enclosingFrames:frames};
+}
+export function describeStudyShape(evidence){
+  const geometry=clipping.intersection(evidence.selectedArea.geometry,evidence.parcel?.geometry??evidence.selectedArea.geometry);
+  const combined=outlineMeasures(geometry);if(!combined)return null;
+  const members=evidence.parcel?.members??(evidence.parcel?[evidence.parcel]:[]);
+  const parcelIntersections=members.filter(p=>p.geometry?.length).flatMap(p=>{
+    const measures=outlineMeasures(clipping.intersection(evidence.selectedArea.geometry,p.geometry));
+    return measures?[{parcelId:p.id,parcelKey:p.key,...measures}]:[];
+  });
+  return {mappedStreetFrontage:streetFrontage(evidence),...combined,parcelIntersections,
+    note:'Enclosing dimensions only, not guaranteed empty or buildable rectangles. EACH connected building or whole attached row must fit inside ONE parcelIntersections outline, including chosen edge clearances. The combined outline does not allow a building to cross a parcel line. Attached-row width is dwelling width times homes_per_row. Taper, holes, mapped buildings, spacing and parking further constrain placement.'};
 }
 
 // Nearest mapped drivable centreline is a design reference, not legal frontage.

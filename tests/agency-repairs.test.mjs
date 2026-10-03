@@ -33,6 +33,26 @@ const makeEntry=(matters='')=>{const e={caseId:'b'.repeat(20),schemaVersion:2,st
 const response=(name,args,n)=>Response.json({model:'fixture-resolved',usage:{input_tokens:90,output_tokens:20},output:[{type:'function_call',call_id:'call-'+n,name,arguments:JSON.stringify(args)}]});
 function scripted(entry,steps,extra={}){let n=0;const payloads=[];const run=createScenarioAgent({optionCount:1,apiKey:'fixture',model:'fixture',resolveContext:()=>entry,reserve:()=>()=>{},...extra,fetchImpl:async(_,request)=>{const payload=JSON.parse(request.body);payloads.push(payload);const state=JSON.parse(payload.input[0].content);assert.ok(n<steps.length,'unexpected model retry: '+JSON.stringify(state.studyState.lastFeedback));const step=typeof steps[n]==='function'?steps[n](state,payload):steps[n];n++;return response(...step,n);}});return {run,payloads};}
 const judgment=(s,c=s.studyState.concepts.at(-1))=>({concept_id:c.id,plan_version:s.studyState.planVersion,evidence_version:c.evidenceVersion,observed_receipt_ids:[c.observationId],verdict:c.buildingsCount?'ready-to-compare':'unresolved',priority_findings:s.studyState.brief.map(p=>({priority_id:p.id,status:'tradeoff',finding:'The measured footprint leaves some outdoor land; delivery remains unresolved.'})),limitations:['Access, complete site standards and affordable delivery remain unverified.'],next_action:'Compare the compact arrangement against the alternatives.'});
+
+test('a still-unanswered route keeps its lookup tool after ten study steps',async()=>{
+ const entry=makeEntry('How far is the school?');entry.session.toolDefinitions=()=>[{type:'function',function:{name:'read_nearby_places',parameters:{properties:{}}}}];let n=0;
+ const run=createScenarioAgent({optionCount:1,resolveContext:()=>entry,reserve:()=>()=>{},fetchImpl:async(_,request)=>{
+  const body=JSON.parse(request.body);n++;
+  if(n===1)return response('interpret_priorities',{items:[purpose,{label:'School',meaning:'Check travel distance',original_excerpt:'How far is the school?',kind:'question',target:'whole-site',research_topic:'place-route',measurement_needed:'street-route'}]},n);
+  if(n===2)return response('test_layout',params,n);
+  if(n<12)return Response.json({status:'incomplete',output:[]});
+  assert.ok(body.tools.some(t=>t.function.name==='read_nearby_places'),'Late lookup must remain available');throw Error('late lookup verified');
+ }});
+ await assert.rejects(run({assessmentVersion:ref}),/late lookup verified/);assert.equal(n,12);
+});
+
+test('a fully tested no-fit study can explain unavailable proposal effects without inventing measurements',async()=>{
+ const entry=makeEntry('What are the effects on neighbors?');const noFit={...params,width:16,depth:24,homes:1,parking_spaces:0};entry.e.parcel.geometry=entry.e.selectedArea.geometry=rect(0,0,5,5);
+ const steps=[['interpret_priorities',{items:[purpose,{label:'Effects',meaning:'Check the proposal effects',original_excerpt:'What are the effects on neighbors?',kind:'question',target:'whole-site',research_topic:'surrounding-effects',measurement_needed:'proposal-surroundings'}]}],...Array.from({length:6},()=>['test_layout',noFit]),(s,p)=>{
+  assert.ok(p.tools.some(t=>t.function.name==='note_priority_gap'));assert.ok(!p.tools.some(t=>t.function.name==='submit_priority_answer'));
+  return ['note_priority_gap',{priority_id:'priority-1',reason:'These tests have not placed a building, so its effects cannot yet be measured. This does not establish that housing cannot fit.'}];},s=>['review_layout',judgment(s)],s=>['select_layout',select(s)]];
+ const result=await scripted(entry,steps).run({assessmentVersion:ref});assert.equal(result.status,'no-fit');assert.equal(result.brief[1].answer.status,'unresolved');assert.equal(result.effects.length,0);
+});
 const select=(s,c=s.studyState.concepts[0])=>({concept_id:c.id,rationale:'The compact arrangement leaves room between buildings.',support:[],selections:(s.studyState.options??[]).filter(o=>o.useStatus==='conditional').map(o=>{const chosen=o.id===c.optionId?c:s.studyState.concepts.find(c=>c.optionId===o.id&&c.buildingsCount);return {option_id:o.id,concept_id:chosen.id,review_id:s.studyState.reviews.find(r=>r.conceptId===chosen.id).id,rationale:'The spacing preserves a useful outdoor area.'};}),unresolved_option_ids:(s.studyState.options??[]).filter(o=>o.useStatus==='unresolved').map(o=>o.id)});
 
 test('mixed clauses and more than four concerns are covered without a preset research taxonomy',async()=>{
