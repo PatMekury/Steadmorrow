@@ -1,3 +1,11 @@
+## Findings checkout and exact-wording correction — October 3, 2026
+
+Read `docs/findings-checkout-repair.md` and workspace `output/verification/restart-checkout-repair-2026-10-03/README.md`. The user saw an old-code run because the Downloads checkout had returned to old main before restart. Local main is now fast-forwarded to already-merged `af58003`; inspect branch/head and source capability before future restarts, not only HTTP status. No new GitHub push occurred.
+
+Exact generic concern wording was tested with fictional context only. Final live research/study interpretation separates school proximity and surrounding-structure effects, with no typo-triggered clarification or duplicate combined card. Ten provider responses across four attempts; earlier semantic/validation failures are retained. New coverage rejects combined-plus-clause duplication, and covered retained research concerns become exact study-tool choices rather than duplicated original user inputs. New uncovered refinements stay open. 249 tests and syntax checks pass.
+
+The real failed result had no matched parcel and zero operative code provisions. Chrome reload preserves that saved failure; it is not a new successful property study. Public parcel-service metadata was reachable, but the actual selected-land query has not been rerun. The previous specific real-data Gloo approval remains pending. See the installation record for current local branch/head and server. Presentation work remains deferred.
+
 ## Further agency acceptance checks — October 2, 2026
 
 Read `docs/agency-repairs.md` and workspace `output/verification/agency-acceptance-2026-10-02/README.md`. 248 tests and syntax checks pass. Live fictional tests found duplicate mixed-sentence excerpts and recombined research concerns in the study; both now have rejection/recovery regressions. Initial interpretation uses medium reasoning and generic atomic-question guidance; later work/budgets are unchanged. Research concern spans are retained in study coverage. Final held-out live research/study interpretation preserves eight concerns. This phase used 13 successful model responses plus one harness HTTP 422; failed semantic attempts remain documented.

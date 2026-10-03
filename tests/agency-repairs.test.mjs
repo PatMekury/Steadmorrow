@@ -196,10 +196,24 @@ test('study preserves research-separated questions instead of recombining a mixe
  const split=['Are there access obligations,','who would maintain the entrance?'];
  entry.e.concernBrief=[{...purpose,originalExcerpt:'Housing'},...split.map(originalExcerpt=>({originalExcerpt,kind:'question'}))];
  const item=original_excerpt=>({...purpose,original_excerpt,label:'Access question',kind:'question'});
- const m=scripted(entry,[['interpret_priorities',{items:[purpose,item(question)]}],s=>{
+ const m=scripted(entry,[(s,p)=>{const items=p.tools.find(t=>t.function.name==='interpret_priorities').function.parameters.properties.items;assert.equal(items.minItems,3);assert.equal(items.maxItems,3);assert.deepEqual(items.items.properties.original_excerpt.enum,['Housing',...split]);return ['interpret_priorities',{items:[purpose,item(question)]}];},s=>{
   assert.match(s.studyState.lastFeedback,/Uncovered/);
-  assert.ok(split.every(text=>s.originalInputs.some(i=>i.text===text)));
+  assert.ok(split.every(text=>s.propertyEvidence.concernBrief.some(i=>i.originalExcerpt===text)));
+  assert.ok(!s.originalInputs.some(i=>split.includes(i.text)),'Retained interpretations must not masquerade as additional user inputs');
   return ['interpret_priorities',{items:[purpose,...split.map(item)]}];
  },['note_priority_gap',{priority_id:'priority-1',reason:'Recorded access obligations require the applicable instrument.'}],['note_priority_gap',{priority_id:'priority-2',reason:'Maintenance responsibility requires the operative shared-access agreement.'}],['finish_unresolved_study',{}]]);
  const result=await m.run({assessmentVersion:ref});assert.equal(result.brief.length,3);assert.deepEqual(result.brief.slice(1).map(p=>p.originalExcerpt),split);
+});
+
+
+test('a mixed input cannot appear alongside its already represented separate concerns',()=>{
+ const text='Nearness to ta an elementary school and the effects of the new building to the surrounding structures';
+ const separate=[{id:'school',originalExcerpt:'Nearness to ta an elementary school'},{id:'effects',originalExcerpt:'the effects of the new building to the surrounding structures'}];
+ assert.throws(()=>concernCoverage([{id:'input',text}],[{id:'combined',originalExcerpt:text},...separate]),/combined concern/);
+ assert.equal(concernCoverage([{id:'input',text}],separate)[0].priorityIds.length,2);
+ // One broad effects question with multiple receptors stays one concern.
+ const broad='What effects would new housing have on surrounding structures and the environment?';
+ assert.equal(concernCoverage([{id:'broad',text:broad}],[{id:'effects',originalExcerpt:broad}])[0].priorityIds.length,1);
+ // A shared phrase across distinct inputs does not erase the additional intent.
+ assert.equal(concernCoverage([{id:'goal',text:'Housing'},{id:'purpose',text:'Housing with shared space'}],[{id:'a',originalExcerpt:'Housing'},{id:'b',originalExcerpt:'Housing with shared space'}]).length,2);
 });
