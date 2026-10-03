@@ -217,3 +217,32 @@ test('a mixed input cannot appear alongside its already represented separate con
  // A shared phrase across distinct inputs does not erase the additional intent.
  assert.equal(concernCoverage([{id:'goal',text:'Housing'},{id:'purpose',text:'Housing with shared space'}],[{id:'a',originalExcerpt:'Housing'},{id:'b',originalExcerpt:'Housing with shared space'}]).length,2);
 });
+
+
+test('actual findings service interprets only original user text and publishes concerns before records',async()=>{
+ const matters='nearness to ta an elementary school and the effects of the new building to the surrounding structures';
+ const entry=makeEntry(matters);entry.input.query='Church search phrase';
+ const progress=[],payloads=[];
+ const service=createFindingsService({apiKey:'fixture',assessmentAuditor:null,fetchImpl:async(_url,request)=>{
+  const p=JSON.parse(request.body);payloads.push(p);
+  if(payloads.length<=2){
+   const first=JSON.parse(p.input[0].content);
+   assert.deepEqual(first.originalInputs.map(i=>i.text),['Housing',matters]);
+   assert.doesNotMatch(p.input[0].content,/selectedArea|userQuery|parcelKey|requiredResearch|Church search phrase|lat|lng/);
+   assert.deepEqual(p.tools.map(t=>t.function.name),['interpret_concerns']);
+   if(payloads.length===1)return response('interpret_concerns',{items:[{original_excerpt:'Research this property',label:'Invented task',kind:'goal',research_topic:'research'}]},1);
+   assert.match(p.input.find(i=>i.type==='function_call_output').output,/Each concern must quote an exact original span/);
+   return response('interpret_concerns',{items:[{original_excerpt:'Housing',label:'Housing',kind:'goal',research_topic:'housing'},{original_excerpt:'nearness to ta an elementary school',label:'School proximity',kind:'question',research_topic:'school-distance'},{original_excerpt:'the effects of the new building to the surrounding structures',label:'Surrounding effects',kind:'question',research_topic:'surroundings'}]},2);
+  }
+  assert.ok(p.tools.some(t=>t.function.name==='resolve_location'));
+  assert.match(p.input[0].content,/selectedArea/);
+  throw new Error('Stop after the real service accepts interpretation; no external record lookups.');
+ }});
+ const result=await service(entry.input,{onProgress:p=>progress.push(p)});
+ assert.equal(result.concernBrief.length,3);
+ assert.ok(progress.some(p=>p.message==='Separating your goals and questions…'));
+ assert.ok(progress.some(p=>p.evidence?.concernBrief?.length===3));
+ assert.equal(result.research.firstEvidenceMs,null,'Interpretation alone is not property evidence');
+ assert.equal(result.research.events[0].outcome,'failed');
+ assert.equal(result.research.events[1].outcome,'interpreted');
+});

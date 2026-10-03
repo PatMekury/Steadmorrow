@@ -1,3 +1,9 @@
+## Actual-property approval and findings-service repair — October 3, 2026
+
+The user explicitly answered “Yes, run the actual property check” for the named Gloo/location/concerns/records transmission and existing public map/property lookups. The earlier approval block is resolved for this action. The first actual run exposed integration bugs: full research metadata reached the interpretation model, and missing progress labels threw before the interpreter ran. It was stopped after seven recorded model responses/eight requests, without any property-tool execution. Do not count it as a completed research run.
+
+The production service now projects only original concern inputs during interpretation, preserves correction feedback, supplies missing progress labels/fallback, and emits accepted concerns before record retrieval without misreporting first-evidence timing. The new test exercises the actual service with its real session. 250 tests and syntax checks pass. Read `docs/findings-checkout-repair.md` and the workspace report. Resume the now-approved actual check on the corrected server; preserve evidence and avoid repeating completed property research unnecessarily. Presentation work remains deferred.
+
 ## Findings checkout and exact-wording correction — October 3, 2026
 
 Read `docs/findings-checkout-repair.md` and workspace `output/verification/restart-checkout-repair-2026-10-03/README.md`. The user saw an old-code run because the Downloads checkout had returned to old main before restart. Local main is now fast-forwarded to already-merged `af58003`; inspect branch/head and source capability before future restarts, not only HTTP status. No new GitHub push occurred.

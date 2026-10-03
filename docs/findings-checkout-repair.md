@@ -26,3 +26,12 @@ Final `exact-wording-retained.json`: two real Gloo responses, three total concer
 Chrome reload preserved its old failed saved result, with the explicit saved-findings banner. The selected real land has not been resubmitted by this repair. The prior specific Gloo transmission approval requirement remains until the user approves. A fresh property run is needed to determine whether usable parcel and housing provisions can be obtained; no positive housing conclusion is manufactured. Presentation work remains deferred.
 
 Final installed revision/process and tests are recorded in installation.json. The source changes remain local unless separately published.
+
+
+## Approved actual run: service integration correction
+
+The user explicitly approved the actual property/Gloo check. That approval supersedes the pending wording above. The first actual run exposed two integration bugs not exercised by the earlier isolated interpretation or fixture-browser checks: the first model request received the full research envelope instead of an `originalInputs` projection, and missing progress labels caused `emit(undefined)` to throw before `interpret_concerns` executed. The exception was misleadingly reported as a source failure. The run was stopped after seven recorded model responses/eight requests; no new property tool executed. Its durable trace is retained locally.
+
+The initial interpretation now receives only the original input spans plus the last interpretation/correction exchange. Full selected geometry and research context become available once interpretation succeeds. Both interpretation and passage-continuation tools have progress labels, with a generic fallback for future tools. Accepted concerns emit immediately, independently of later record success; this does not count as time to first property evidence. Validation messages remain actionable, and the argument bound accommodates the declared concern count.
+
+A new regression uses the production `createFindingsService` and its real `createResearchSession`, verifies metadata is absent from the first model request, rejects an invented task excerpt, recovers the corrected interpretation, observes progress and all three concern cards before any property lookup, and preserves the null property-evidence timing. All 250 tests and syntax checks pass. The corrected actual run is next; no successful housing finding is claimed by this service test.
