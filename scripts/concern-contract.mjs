@@ -6,6 +6,8 @@ export function goalItems(priorities,previous=[],refinement=''){
   return [...new Set([priorities.purpose,priorities.matters,...(priorities.choices??[]),...previous,refinement].filter(Boolean))].map(text=>({id:'input-'+evidenceId(text),text}));
 }
 export function concernCoverage(inputs,items){
+  const excerpts=items.map(p=>(p.originalExcerpt??p.original_excerpt).trim());
+  if(new Set(excerpts).size!==excerpts.length)throw new Error('Interpret each distinct concern with its own exact excerpt. Do not duplicate a mixed sentence across different topics or kinds; split it into the actual clauses.');
   const coverage=inputs.map(input=>{
     const matches=items.filter(p=>input.text.includes(p.originalExcerpt??p.original_excerpt));
     let remaining=input.text;

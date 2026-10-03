@@ -180,3 +180,26 @@ test('completed factual answers retire redundant submissions while goals remain 
  const m=scripted(entry,[['interpret_priorities',{items:[purpose,{...purpose,original_excerpt:entry.input.priorities.matters,label:'Restrictions',kind:'question'}]}],['submit_priority_answer',{priority_id:'priority-1',status:'partial',answer:'The public provision references covenants; applicability remains unresolved.',applicability:'Only the supplied provision is available.',evidence_refs:['rule::rule-p1'],unresolved_checks:['Check recorded instruments.']}],(s,p)=>{assert.ok(!p.tools.some(t=>t.function.name==='submit_priority_answer'));assert.equal(s.studyState.brief[1].answer.status,'partial');return ['finish_unresolved_study',{}];}],{priorityAuditor:async()=>({accepted:true,reason:'Qualified.'})});
  assert.equal((await m.run({assessmentVersion:ref})).status,'needs-evidence');
 });
+
+
+test('mixed sentences cannot masquerade as separate concerns by duplicating the full excerpt',()=>{
+ const input=[{id:'mixed',text:'Keep a garden; would new buildings affect drainage?'}];
+ assert.throws(()=>concernCoverage(input,[{id:'a',originalExcerpt:input[0].text,kind:'goal'},{id:'b',originalExcerpt:input[0].text,kind:'question'}]),/Do not duplicate/);
+ const split=concernCoverage(input,[{id:'a',originalExcerpt:'Keep a garden;',kind:'goal'},{id:'b',originalExcerpt:'would new buildings affect drainage?',kind:'question'}]);
+ assert.deepEqual(split[0].priorityIds,['b','a']);
+});
+
+
+test('study preserves research-separated questions instead of recombining a mixed sentence',async()=>{
+ const question='Are there access obligations, and who would maintain the entrance?';
+ const entry=makeEntry(question);entry.result.housingRoute='unresolved';
+ const split=['Are there access obligations,','who would maintain the entrance?'];
+ entry.e.concernBrief=[{...purpose,originalExcerpt:'Housing'},...split.map(originalExcerpt=>({originalExcerpt,kind:'question'}))];
+ const item=original_excerpt=>({...purpose,original_excerpt,label:'Access question',kind:'question'});
+ const m=scripted(entry,[['interpret_priorities',{items:[purpose,item(question)]}],s=>{
+  assert.match(s.studyState.lastFeedback,/Uncovered/);
+  assert.ok(split.every(text=>s.originalInputs.some(i=>i.text===text)));
+  return ['interpret_priorities',{items:[purpose,...split.map(item)]}];
+ },['note_priority_gap',{priority_id:'priority-1',reason:'Recorded access obligations require the applicable instrument.'}],['note_priority_gap',{priority_id:'priority-2',reason:'Maintenance responsibility requires the operative shared-access agreement.'}],['finish_unresolved_study',{}]]);
+ const result=await m.run({assessmentVersion:ref});assert.equal(result.brief.length,3);assert.deepEqual(result.brief.slice(1).map(p=>p.originalExcerpt),split);
+});
