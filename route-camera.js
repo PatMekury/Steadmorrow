@@ -13,8 +13,8 @@ export function frameRouteFromSite(camera,{site,points,destination,aspect}){
   let scale=1;
   for(let i=0;i<60;i++,scale*=1.12){
     camera.position.copy(center).addScaledVector(heading,-span*1.0*scale);camera.position.y=span*.85*scale;
-    camera.lookAt(center.clone().addScaledVector(heading,span*1.0*scale));camera.updateMatrixWorld();
+    camera.lookAt(center.clone().addScaledVector(heading,span*.65*scale));camera.updateMatrixWorld();
     if(points.every(p=>{const v=p.clone().project(camera);return Math.abs(v.x)<.84&&v.y>-.8&&v.y<.82&&v.z>-1&&v.z<1;}))break;
   }
-  return {center,target:center.clone().addScaledVector(heading,span*1.0*scale),span};
+  return {center,target:center.clone().addScaledVector(heading,span*.65*scale),span};
 }
