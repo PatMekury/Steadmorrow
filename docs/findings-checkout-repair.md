@@ -44,7 +44,7 @@ A focused continuation reused the actual server session and retrieved records. I
 
 Corrections now include:
 
-- Review references select retained source excerpts rather than reconstructing truncated quotations. Every prose field receives its own source-review verdict; corrections block acceptance. Exact originals remain in the audit packet and final feedback, including housing-analysis-only citations.
+- Review references select retained source excerpts rather than reconstructing truncated quotations. Every prose field receives its own source-review verdict; unsupported verdicts block acceptance. Exact originals remain in the audit packet and final feedback, including housing-analysis-only citations.
 - An exception-bearing preliminary approval route must retain conditional wording in every affected clause. Validation returns all affected fields together. Questions about whether approval applies remain valid.
 - Assessment writing uses medium reasoning and a bounded ninety-second per-response allowance within the unchanged three-minute research limit; ordinary discovery remains at forty-five seconds. A live medium-reasoning writer exceeded the old limit.
 - Route attachment is validated by the exact original concern and actual street-route receipt, without requiring an old closed set of research-topic labels. A different concern's receipt and legacy direct-line measurements remain rejected.

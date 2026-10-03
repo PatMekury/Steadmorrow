@@ -33,12 +33,12 @@ Tax descriptions and mapped shapes do not prove vacancy, ownership, common contr
   const calls=data.output?.filter(c=>c.type==='function_call')??[];
   if(data.status==='incomplete'||calls.length!==1||calls[0].name!=='record_assessment_audit')throw new Error('Assessment source review returned no complete decision.');
   const decision=JSON.parse(calls[0].arguments);
-  const validChecks=Array.isArray(decision.checks)&&decision.checks.length===Object.keys(fields).length&&new Set(decision.checks.map(c=>c?.field)).size===Object.keys(fields).length&&decision.checks.every(c=>c&&Object.hasOwn(fields,c.field)&&['supported','qualified-or-unknown','unsupported'].includes(c.verdict)&&(sourceExcerpts.some(s=>s.id===c.source_excerpt_id)||c.verdict==='qualified-or-unknown'&&!c.correction.trim()&&c.source_excerpt_id==='not-a-factual-claim')&&typeof c.reason==='string'&&c.reason.trim()&&c.reason.length<=240&&typeof c.correction==='string'&&c.correction.length<=300&&(c.verdict==='unsupported'?c.correction.trim():true));
+  const validChecks=Array.isArray(decision.checks)&&decision.checks.length===Object.keys(fields).length&&new Set(decision.checks.map(c=>c?.field)).size===Object.keys(fields).length&&decision.checks.every(c=>c&&Object.hasOwn(fields,c.field)&&['supported','qualified-or-unknown','unsupported'].includes(c.verdict)&&(sourceExcerpts.some(s=>s.id===c.source_excerpt_id)||c.verdict==='qualified-or-unknown'&&c.source_excerpt_id==='not-a-factual-claim')&&typeof c.reason==='string'&&c.reason.trim()&&c.reason.length<=240&&typeof c.correction==='string'&&c.correction.length<=300&&(c.verdict==='unsupported'?c.correction.trim():true));
   if(!validChecks){
     ledger?.record({type:'review',phase:'assessment-audit',status:'invalid',reason:'Every current field needs one verdict with a retained excerpt or an explicitly non-factual unknown.'});
     throw new Error('Assessment source review returned an invalid decision. Check every current field exactly once with valid source excerpt IDs and a correction for each unsupported claim.');
   }
-  const issues=decision.checks.filter(c=>c.verdict==='unsupported'||c.correction.trim()).map(check=>{const excerpt=sourceExcerpts.find(s=>s.id===check.source_excerpt_id);return {field:check.field,claim:fields[check.field],sourceId:excerpt.sourceId,sourceQuote:excerpt.quote,reason:check.reason,correction:check.correction};});
+  const issues=decision.checks.filter(c=>c.verdict==='unsupported').map(check=>{const excerpt=sourceExcerpts.find(s=>s.id===check.source_excerpt_id);return {field:check.field,claim:fields[check.field],sourceId:excerpt.sourceId,sourceQuote:excerpt.quote,reason:check.reason,correction:check.correction};});
   const result={accepted:issues.length===0,issues,checks:decision.checks};
   ledger?.record({type:'review',phase:'assessment-audit',status:result.accepted?'accepted':'rejected',arguments:result});
   return {...result,method:'independent-gloo-source-review',expertApproval:false};

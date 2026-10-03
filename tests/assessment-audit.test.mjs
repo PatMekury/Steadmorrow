@@ -53,6 +53,11 @@ test('audit excerpt references retain exact exception text and reject invented r
  const result=await invoke(false);assert.equal(result.issues[0].claim,narrative.assessment.headline);assert.ok(rule.text.includes(result.issues[0].sourceQuote));assert.match(result.issues[0].sourceQuote,/only if land is divided/);
  await assert.rejects(invoke(true),/invalid decision/);
 });
+test('audit permits an editorial note on a qualified recommendation but cannot omit a field',async()=>{
+ const narrative=parseReview(expand(draft()),evidence.sources,evidence);
+ const invoke=omit=>auditAssessment({narrative,evidence,apiKey:'fixture',model:'fixture',fetchImpl:async(_,request)=>{const body=JSON.parse(request.body),replyData=await auditReply(body).json(),decision=JSON.parse(replyData.output[0].arguments);decision.checks.at(-1).correction='This is a recommended next step, not an affirmative source claim.';if(omit)decision.checks.pop();return reply('record_assessment_audit',decision);}});
+ assert.equal((await invoke(false)).accepted,true);await assert.rejects(invoke(true),/every current field/);
+});
 test('failed review can resume the same sources with a new signal and no new session',async()=>{
  let sessions=0,calls=0,renewed=0,fail=true;
  const service=createFindingsService({apiKey:'test',sessionFactory:()=>{sessions++;return {snapshot:()=>evidence,execute:async()=>({}),renewSignal:()=>{renewed++;}};},fetchImpl:async(_url,opts)=>{calls++;const b=JSON.parse(opts.body);if(b.tools.some(t=>t.function.name==='record_assessment_audit'))return fail?new Response('',{status:503}):auditReply(b);if(!b.tools.some(t=>t.function.name==='submit_assessment'))return reply('review_evidence',{});return reply('submit_assessment',draft());}});
