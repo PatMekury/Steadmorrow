@@ -8,6 +8,9 @@ const snap=v=>Math.round(v*1e6)/1e6;
 const rect=(x,y,w,h)=>[[[[x,y],[x+w,y],[x+w,y+h],[x,y+h],[x,y]]].map(r=>r.map(p=>p.map(snap)))];
 export const layoutRequiredParameters=['width','depth','storeys','storey_height','spacing','edge_clearance','angle','homes','parking_spaces'];
 export const layoutParameters={
+  parking_bay_width:{type:'number',minimum:2,maximum:5,description:'Metres. Choose from the applicable sourced parking standard; otherwise disclose an assumption.'},
+  parking_bay_depth:{type:'number',minimum:4,maximum:9,description:'Metres. Choose from the applicable sourced parking standard; otherwise disclose an assumption.'},
+  parking_aisle_width:{type:'number',minimum:3,maximum:12,description:'Metres. Maneuvering aisle allowance; verify turning, accessible spaces and driveway connection separately.'},
   parking_strategy:{type:'string',enum:['street-edge','compact'],description:'Street-edge reserves a grouped parking court near the closest mapped drivable street before placing homes. Compact prioritizes housing and then groups parking in remaining space. Both leave the driveway, pedestrian access and parking requirement unverified.'},
   width:{type:'number',minimum:4,maximum:40,description:'Metres. Detached/attached: footprint width of one dwelling (maximum 16). Apartment: complete building width.'},
   depth:{type:'number',minimum:5,maximum:40,description:'Metres. Detached/attached: footprint depth of one dwelling (maximum 24). Apartment: complete building depth.'},
@@ -33,6 +36,7 @@ export function validateLayout(args){
     if(p.enum?!p.enum.includes(v):!Number.isFinite(v)||v<p.minimum||v>p.maximum||(p.type==='integer'&&!Number.isInteger(v)))throw new Error('Invalid layout parameter: '+k);
     canonical[k]=v;
   }
+  for(const key of ['parking_bay_width','parking_bay_depth','parking_aisle_width'])if(args[key]!==undefined){const rule=layoutParameters[key];if(!Number.isFinite(args[key])||args[key]<rule.minimum||args[key]>rule.maximum)throw new Error('Invalid parking dimension: '+key);canonical[key]=args[key];}
   // Form-irrelevant optional fields are not assumptions for this test. The
   // canonical object deliberately excludes them before quantities or IDs form.
   canonical.typology=typology;
@@ -82,23 +86,24 @@ function calculateAtAngle(evidence,input){
     return true;
   };
   const occupy=cell=>{used=used.length?clipping.union(used,cell):cell;};
-  // A grouped court has one continuous six-metre maneuvering strip. Its
+  // A grouped court has one continuous maneuvering strip of the chosen width. Its
   // position is scored against a mapped street, never certified as a driveway.
+  const bayWidth=args.parking_bay_width??2.6,bayDepth=args.parking_bay_depth??5,aisleWidth=args.parking_aisle_width??6,courtDepth=bayDepth+aisleWidth;
   const placeParking=()=>{
     if(!args.parking_spaces)return;
-    for(let count=Math.min(args.parking_spaces,Math.floor((x1-x0-2*margin)/2.6));count>=1;count--){
+    for(let count=Math.min(args.parking_spaces,Math.floor((x1-x0-2*margin)/bayWidth));count>=1;count--){
       const candidates=[];
-      for(let y=y0+margin;y+11+margin<=y1;y+=step)for(let x=x0+margin;x+2.6*count+margin<=x1;x+=step){
-        const aisleLow=front&&front[1]<y+5.5;
-        const center=[x+1.3*count,y+(aisleLow?3:8)];
+      for(let y=y0+margin;y+courtDepth+margin<=y1;y+=step)for(let x=x0+margin;x+bayWidth*count+margin<=x1;x+=step){
+        const aisleLow=front&&front[1]<y+courtDepth/2;
+        const center=[x+bayWidth*count/2,y+(aisleLow?aisleWidth/2:bayDepth+aisleWidth/2)];
         candidates.push({x,y,aisleLow,score:front?Math.hypot(center[0]-front[0],center[1]-front[1]):y-y0+x-x0});
       }
       candidates.sort((a,b)=>a.score-b.score);
       for(const {x,y,aisleLow} of candidates){
-        if(!fits(rect(x-margin,y-margin,2.6*count+2*margin,11+2*margin),rect(x,y,2.6*count,11)))continue;
-        occupy(rect(x,y,2.6*count,11));
-        for(let i=0;i<count;i++)parking.push({id:'parking-'+(i+1),geometry:map(rect(x+i*2.6,y+(aisleLow?6:0),2.6,5),unproject)});
-        maneuver.push(map(rect(x,y+(aisleLow?0:5),2.6*count,6),unproject));return;
+        if(!fits(rect(x-margin,y-margin,bayWidth*count+2*margin,courtDepth+2*margin),rect(x,y,bayWidth*count,courtDepth)))continue;
+        occupy(rect(x,y,bayWidth*count,courtDepth));
+        for(let i=0;i<count;i++)parking.push({id:'parking-'+(i+1),geometry:map(rect(x+i*bayWidth,y+(aisleLow?aisleWidth:0),bayWidth,bayDepth),unproject)});
+        maneuver.push(map(rect(x,y+(aisleLow?0:bayDepth),bayWidth*count,aisleWidth),unproject));return;
       }
     }
   };
@@ -132,9 +137,9 @@ function calculateAtAngle(evidence,input){
   const formAssumption=form==='detached'?`One dwelling per block; ${args.width} × ${args.depth} m footprint, ${args.storeys} storey${args.storeys===1?'':'s'}. Interior rooms, stairs and wall areas are not resolved.`:form==='attached'?`One dwelling per attached block; ${args.width} × ${args.depth} m per dwelling, ${args.storeys} storeys, up to ${args.homes_per_row} connected homes in a row. Party walls, individual entrances, interior plans and safe egress are not resolved.`:`Apartment massing uses a ${args.width} × ${args.depth} m floor plate and ${args.storeys} storeys. Up to ${args.units_per_floor} assumed dwellings per floor receive ${args.unit_area} m² each, after reserving ${args.circulation_percent}% of every floor for shared circulation, cores, walls and services. This is an area allocation, not a floor plan; the reserve does not prove usable corridors, daylight, accessibility or safe egress. Allocations stop at the requested home count; remaining floor area stays unallocated.`;
   const kind=form==='attached'?'attached-row':form==='apartment'?'apartment-mass':'detached-block';
   return {id:hash([evidence.caseId,evidence.siteContext?.geometryVersion??null,args,buildings,parking]),evidenceVersion:evidence.caseId,contextVersion:evidence.siteContext?.geometryVersion??null,roadContextVersion:front?evidence.siteContext?.renderVersion:null,typology:form,blockedRegions,status:buildings.length?'illustrative':'no-fit',method:kind+'-translated-v4-parcel-boundaries',scope:'Selected land intersected with retained mapped parcels; each mass stays inside one parcel. Common ownership or legal consolidation is not assumed. All layout dimensions and dwelling allocations are assumptions.',parameters:args,site:map(site,unproject),buildings,parking,maneuver,metrics,
-    siteDesign:{parkingStrategy:args.parking_strategy??(front?'street-edge':'compact'),frontage,parkingBayMeters:[2.6,5],maneuverDepthMeters:6,parkingGrouped:true,entrances:'Illustrative facade openings facing the shared site or mapped street, not verified entrances.',pedestrianAccess:'A continuous accessible pedestrian route, driveway connection and fire access remain unresolved.',unallocatedSiteSquareMeters:Math.max(0,siteArea-footprint-area(blocked)-area(map(parking.map(p=>p.geometry).flat(1),project))-area(map(maneuver.flat(1),project))),reason:front?'Parking is grouped and oriented toward the closest mapped street; a connection across the intervening land is not established.':'No usable street frontage was retrieved. Parking is grouped within remaining land; access is unresolved.'},
+    siteDesign:{parkingStrategy:args.parking_strategy??(front?'street-edge':'compact'),frontage,parkingBayMeters:[bayWidth,bayDepth],maneuverDepthMeters:aisleWidth,parkingGrouped:true,entrances:'Illustrative facade openings facing the shared site or mapped street, not verified entrances.',pedestrianAccess:'A continuous accessible pedestrian route, driveway connection and fire access remain unresolved.',unallocatedSiteSquareMeters:Math.max(0,siteArea-footprint-area(blocked)-area(map(parking.map(p=>p.geometry).flat(1),project))-area(map(maneuver.flat(1),project))),reason:front?'Parking is grouped and oriented toward the closest mapped street; a connection across the intervening land is not established.':'No usable street frontage was retrieved. Parking is grouped within remaining land; access is unresolved.'},
     ignoredParameters,parameterNotes,diagnostics:{search:searchStats,translationStepMeters:step,testedFootprintWidthMeters:massWidth,testedFootprintDepthMeters:args.depth,testedFootprintSquareMeters:massWidth*args.depth,requestedTypology:form,unplacedHomes:args.homes-allocatedHomes},
-    assumptions:[formAssumption,`${args.spacing} m spacing between ${form==='attached'?'whole rows':'buildings'} and ${args.edge_clearance} m edge clearance are design assumptions, not legal setbacks.`,`Parking assumes 2.6 × 5 m bays with a 6 m maneuvering strip. Connection to a public road, accessible spaces and the required number are unverified.`, 'Mapped existing footprints are excluded from placement. Map coverage may be incomplete; an empty map area does not establish vacancy. Easements, fire access, terrain, drainage and utility capacity remain unverified. No existing buildings are removed by this model.'],
+    assumptions:[formAssumption,`${args.spacing} m spacing between ${form==='attached'?'whole rows':'buildings'} and ${args.edge_clearance} m edge clearance are design assumptions, not legal setbacks.`,`Parking assumes ${bayWidth} × ${bayDepth} m bays with a ${aisleWidth} m maneuvering strip. Connection to a public road, accessible spaces and the required number are unverified.`, 'Mapped existing footprints are excluded from placement. Map coverage may be incomplete; an empty map area does not establish vacancy. Easements, fire access, terrain, drainage and utility capacity remain unverified. No existing buildings are removed by this model.'],
     checks:{mappedBuildingAvoidance:'passed',geometricContainment:'passed',overlap:'passed',...(form==='apartment'?{assumedFloorAreaAllocation:'passed'}:{}),interiorPlanning:'not-established',legalCapacity:'not-established',affordableDelivery:'not-established',access:'not-established'},
     limitations:allocatedHomes<args.homes?`This ${kind} test allocated ${allocatedHomes} of the ${args.homes} homes it attempted. Other forms, dimensions and arrangements have not been ruled out.`:'This arrangement fits the geometric and stated area-allocation assumptions; it does not establish an approvable home count.'};
 }

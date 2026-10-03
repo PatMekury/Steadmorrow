@@ -10,7 +10,7 @@ import { readFile, stat, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve, relative, extname, isAbsolute, sep } from 'node:path';
 
-const publicFiles = new Set(['/', '/index.html', '/app.js', '/styles.css', '/land.js', '/land.css', '/geometry.js', '/findings.js', '/spatial-experience.js', '/site-scene.js', '/scene-geometry.js', '/street-geometry.js', '/findings-session.js', '/spatial.css', '/input-privacy.js']);
+const publicFiles = new Set(['/', '/index.html', '/app.js', '/styles.css', '/land.js', '/land.css', '/geometry.js', '/findings.js', '/spatial-experience.js', '/site-scene.js', '/route-camera.js', '/pastor-copy.js', '/scene-geometry.js', '/street-geometry.js', '/findings-session.js', '/spatial.css', '/input-privacy.js']);
 const types = { '.html':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.svg':'image/svg+xml', '.webp':'image/webp', '.png':'image/png', '.mp4':'video/mp4', '.ttf':'font/ttf', '.woff2':'font/woff2', '.json':'application/json' };
 
 async function readAppConfig(root, environment) {

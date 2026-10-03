@@ -634,7 +634,7 @@ async function simulateFindings(refinement='') {
   scenarioController?.abort();const controller=new AbortController();scenarioController=controller;
   const sequence=++scenarioSequence,assessmentVersion=lastFindings.result.version.assessment;studyQuestions.delete(assessmentVersion);
   simulationState={busy:true,refinement,clarificationId,message:'Considering your priorities and testing a housing idea…'};workBanner(simulationState.message,'Exploring possibilities');displayFindings(lastFindings.result);
-  const timer=setTimeout(()=>controller.abort(),200000);
+  const timer=setTimeout(()=>controller.abort(),260000);
   try{
     const response=await fetch('/api/scenario',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/x-ndjson'},body:JSON.stringify({assessmentVersion,refinement,clarificationId}),signal:controller.signal});
     if(!response.ok){const e=await response.json();throw new Error(e.error||'The exploration could not start.');}

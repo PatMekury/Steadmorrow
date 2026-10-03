@@ -98,3 +98,10 @@ test('a failed test cannot displace a reviewed positive result or become a selec
  const [name,args]=steps[round++];return new Response(JSON.stringify({output:[{type:'function_call',call_id:'c'+round,name,arguments:JSON.stringify(typeof args==='function'?args():args)}]}));}});
  const r=await run({assessmentVersion:'a'.repeat(20)});assert.equal(r.options.length,1);assert.equal(r.explorations.length,1);assert.equal(r.explorations[0].concept.status,'no-fit');assert.equal(r.testHistory.length,2);assert.ok(errors.some(e=>e.includes('Select a reviewed placed arrangement')));
 });
+
+test('chosen parking dimensions determine the complete court geometry and stay outside buildings',()=>{
+ const c=calculateConcept(evidence,{...base,parking_spaces:2,parking_bay_width:2.8,parking_bay_depth:5.8,parking_aisle_width:6.4,parking_strategy:'street-edge'});
+ assert.equal(c.parking.length,2);assert.deepEqual(c.siteDesign.parkingBayMeters,[2.8,5.8]);assert.equal(c.siteDesign.maneuverDepthMeters,6.4);
+ for(const p of c.parking){assert.ok(Math.abs(multiArea(p.geometry)-2.8*5.8)<.001);for(const b of c.buildings)assert.ok(overlapArea(p.geometry,b.geometry)<.001);assert.ok(overlapArea(p.geometry,c.maneuver[0])<.001);}
+ assert.ok(Math.abs(multiArea(c.maneuver[0])-2*2.8*6.4)<.001);for(const b of c.buildings)assert.ok(overlapArea(c.maneuver[0],b.geometry)<.001);
+});

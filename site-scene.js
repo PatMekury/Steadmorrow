@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {streetWidth,streetTriangles} from './street-geometry.js';
 import {sceneBuildings, subjectFrame, linkedBuildingIds} from './scene-geometry.js';
+import {frameRouteFromSite} from './route-camera.js';
 
 const EARTH_METRES = 111195;
 const PAPER = '#f6f6f3';
@@ -64,7 +65,9 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
   let focusCenter = new THREE.Vector3(), focusSpan = 150, activeHighlight = '', fitWidth = 150, fitHeight = 150;
   const world = new THREE.Scene();
   world.background = new THREE.Color(PAPER);
-  const camera = new THREE.OrthographicCamera(-100,100,80,-80,.1,6000);
+  const siteCamera = new THREE.OrthographicCamera(-100,100,80,-80,.1,6000);
+  const routeCamera = new THREE.PerspectiveCamera(55,1,.1,6000);
+  let camera=siteCamera,returnView=null;
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   const root = new THREE.Group();
@@ -76,6 +79,7 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
   const output = document.createElement('div'); output.className = 'site-scene-surface';
   output.style.cssText = 'position:absolute;inset:0;overflow:hidden;';
   host.append(output);
+  const routeLabel=document.createElement('span');routeLabel.hidden=true;routeLabel.className='route-destination-label';output.append(routeLabel);
   const status = document.createElement('p'); status.className = 'site-scene-fallback';
   status.style.cssText = 'position:absolute;left:24px;bottom:20px;right:24px;margin:0;font:inherit;color:#535952;';
   status.hidden = true; status.setAttribute('role','status'); output.append(status);
@@ -92,6 +96,7 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
   const glazingMaterial=makeMaterial({color:'#adbfbe',roughness:.38,metalness:.12,side:THREE.DoubleSide});
   const roofMaterial=makeMaterial({color:'#4d9bc6',roughness:.95});
   const sillMaterial=makeMaterial({color:'#f1ede3',roughness:.95});
+  const entryMaterial=makeMaterial({color:'#927257',roughness:.9});
   const roadMaterial = new THREE.MeshBasicMaterial({color:'#d9ddda',side:THREE.DoubleSide}); materials.add(roadMaterial);
   const vergeMaterial = new THREE.MeshBasicMaterial({color:'#e9ebe6',side:THREE.DoubleSide});materials.add(vergeMaterial);
   const whiteHandle = makeMaterial({color:'#ffffff'});
@@ -220,6 +225,8 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
       if(t<1)requestRender();else{revealStart=0;proposalGroup.traverse(n=>{if(n.userData.revealMaterial){n.material.opacity=1;n.material.transparent=false;}});}
     }
     renderer.render(world,camera);
+    const activeRoute=routeReceipt(activeHighlight);
+    if(activeRoute){const p=screenAnchor(project(activeRoute.route.geometry.coordinates.at(-1),1));routeLabel.hidden=!p.visible;routeLabel.textContent='Destination · '+(activeRoute.feature?.name??'Mapped place');routeLabel.style.left=Math.max(110,Math.min(width-110,p.x))+'px';routeLabel.style.top=Math.max(14,p.y-30)+'px';}else routeLabel.hidden=true;
     if(!readyReported){readyReported=true;onReady?.({mode:view,fallback:false});}
     host.dispatchEvent(new CustomEvent('scenechange'));
     onViewChange?.();
@@ -240,6 +247,7 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
   }
 
   function setProjection() {
+    if(camera.isPerspectiveCamera){camera.aspect=width/height;camera.updateProjectionMatrix();return;}
     const aspect=width/height, vertical=Math.max(fitHeight,fitWidth/aspect);
     focusSpan=vertical;
     camera.left=-vertical*aspect/2;camera.right=vertical*aspect/2;camera.top=vertical/2;camera.bottom=-vertical/2;
@@ -254,7 +262,7 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
 
   function applyContextVisibility(mode) {
     const radius=mode==='selection'?Math.min(nearbyRadius(),125):nearbyRadius();
-    const feature=placeObjects.has(mode)?anchors.get(mode):null;
+    const feature=anchors.get(routeReceipt(mode)?.feature?.id??mode);
     const rows=[...contextObjects.values()].map(mesh=>({...mesh.userData,id:mesh.userData.feature.id,sceneParentId:mesh.userData.feature.sceneParentId}));
     const visible=linkedBuildingIds(rows,item=>mode==='context'||item.onProperty||item.distance<=radius||feature&&item.center.distanceTo(feature)<=Math.min(80,radius));
     for(const [id,mesh]of contextObjects)mesh.visible=visible.has(id);
@@ -316,6 +324,15 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
     if(!hasMeasuredSize||!host.isConnected){pendingFit=true;return;}
     pendingFit=false;
     applyContextVisibility(mode);
+    if(routeReceipt(mode)){
+      camera=routeCamera;if(controls)controls.object=camera;
+      const site=framingPoints('selection'),points=framingPoints(mode),receipt=routeReceipt(mode);
+      const framed=frameRouteFromSite(camera,{site,points,destination:project(receipt.route.geometry.coordinates.at(-1)),aspect:width/height});
+      focusCenter.copy(framed.center);focusSpan=framed.span;fitWidth=framed.span;
+      if(controls){controls.target.copy(framed.target);controls.enableRotate=true;controls.minPolarAngle=.12;controls.maxPolarAngle=Math.PI*.46;controls.update();}
+      initializedCamera=true;groundLabel();requestRender();return;
+    }
+    camera=siteCamera;if(controls)controls.object=camera;
     const points=framingPoints(mode),direction=resetRotation?(view==='plan'?new THREE.Vector3(0,1,.00001):architecturalDirection()):camera.position.clone().sub(controls?.target??focusCenter).normalize();
     const upReference=view==='plan'?new THREE.Vector3(0,0,-1):new THREE.Vector3(0,1,0);
     const right=new THREE.Vector3().crossVectors(upReference,direction).normalize(),up=new THREE.Vector3().crossVectors(direction,right).normalize();
@@ -342,6 +359,22 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
     sunlight.position.y=focusCenter.y+320;
     Object.assign(sunlight.shadow.camera,{left:-shadowSize,right:shadowSize,top:shadowSize,bottom:-shadowSize,near:1,far:1400});
     sunlight.shadow.camera.updateProjectionMatrix();initializedCamera=true;groundLabel();requestRender();
+  }
+
+  function openDetail(mode){
+    // One return point for the complete detail session, including switching
+    // directly between walking/driving receipts or other priority cards.
+    if(!returnView)returnView={position:camera.position.clone(),quaternion:camera.quaternion.clone(),target:controls?.target.clone(),zoom:camera.zoom,focusMode,view,fitWidth,fitHeight,focusCenter:focusCenter.clone(),focusSpan,camera};
+    cameraTouched=true;moveCamera(mode);
+  }
+  function closeDetail(){
+    if(!returnView)return;
+    const saved=returnView;returnView=null;
+    camera=saved.camera;focusMode=saved.focusMode;view=saved.view;fitWidth=saved.fitWidth;fitHeight=saved.fitHeight;focusSpan=saved.focusSpan;focusCenter.copy(saved.focusCenter);
+    if(controls){controls.enableDamping=false;controls.update();controls.object=camera;controls.target.copy(saved.target);controls.enableRotate=view!=='plan';controls.minPolarAngle=view==='plan'?0:.12;controls.maxPolarAngle=view==='plan'?.00002:Math.PI*.46;}
+    camera.position.copy(saved.position);camera.quaternion.copy(saved.quaternion);camera.zoom=saved.zoom;setProjection();
+    if(controls){controls.update();controls.enableDamping=true;}
+    applyContextVisibility(focusMode);setHighlight(null);groundLabel();requestRender();
   }
 
   function buildLand() {
@@ -484,7 +517,7 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
     const meshes=[];
     for(const b of concept.buildings){
       if(!Number.isFinite(b.height)||b.height<=0)continue;
-      const pitched=b.typology!=='apartment',rise=pitched?Math.min(1.15,b.height*.21):.12,wallHeight=b.height-rise;
+      const pitched=true,rise=Math.min(1.35,b.height*.18),wallHeight=b.height-rise;
       const center=average(allPoints(b.geometry)),ring=polygonCoordinates(b.geometry)[0][0],local=ring.map(p=>project(p));
       const minSide=Math.min(local[0].distanceTo(local[1]),local[1].distanceTo(local[2])),factor=1-.16/minSide;
       const inset=polygonCoordinates(b.geometry).map(p=>p.map(r=>r.map(([x,y])=>[center[0]+(x-center[0])*factor,center[1]+(y-center[1])*factor])));
@@ -534,7 +567,7 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
     for(const face of faces){
       const {a,dx,dz,length,nx,nz}=face,angle=Math.atan2(nx,nz);
       const box=(w,h,d,t,y,mat,offset=-.035)=>{const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);mesh.position.set(a.x+dx*t+nx*offset,y,a.z+dz*t+nz*offset);mesh.rotation.y=angle;mesh.castShadow=true;mesh.receiveShadow=true;proposalGroup.add(mesh);return mesh;};
-      const bays=Math.max(2,Math.floor(length/2.5)),bayWidth=length/bays,ww=Math.min(1.35,bayWidth*.57),wh=Math.min(1.4,floorHeight*.53);
+      const bays=Math.max(2,Math.floor(length/3.4)),bayWidth=length/bays,ww=Math.min(1.2,bayWidth*.48),wh=Math.min(1.5,floorHeight*.58);
       for(let floor=0;floor<storeys;floor++)for(let bay=0;bay<bays;bay++){
         const t=(bay+.5)/bays,door=face===entrance&&floor===0&&bay===Math.floor(bays/2),h=door?Math.min(2.1,floorHeight-.12):wh,w=door?.94:ww,y=door?h/2:floorHeight*(floor+.54);
         box(w+.16,h+.16,.065,t,y,sillMaterial,-.043);
@@ -543,7 +576,9 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
         if(!door)box(.045,h,.045,t,y,sillMaterial,-.03);
         else{box(.09,h+.12,.065,t-(w/2+.08)/length,y,sillMaterial);box(.09,h+.12,.065,t+(w/2+.08)/length,y,sillMaterial);}
       }
-      if(building.typology==='apartment')for(let floor=1;floor<storeys;floor++)box(length-.18,.12,.065,.5,floor*floorHeight,sillMaterial,-.04);
+      // Individual window surrounds and a warm front door read as homes;
+      // continuous floor bands made the same mass look like a warehouse.
+      if(face===entrance){const t=(Math.floor(bays/2)+.5)/bays;box(.82,1.95,.04,t,.975,entryMaterial,-.018);box(1.45,.12,.38,t,2.15,roofMaterial,-.20);}
     }
   }
 
@@ -564,7 +599,7 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
       const line=streetMesh(pts,routeWidth,material,.45);line.renderOrder=14;line.userData.ownMaterial=true;measurementGroup.add(line);
       for(const coordinate of [receipt.route.start,receipt.route.end]){
         const pin=new THREE.Group(),ring=new THREE.Mesh(new THREE.TorusGeometry(3,.8,8,24),material),stem=new THREE.Mesh(new THREE.ConeGeometry(1.7,4,16),material);
-        ring.position.y=7;stem.rotation.z=Math.PI;stem.position.y=2;pin.add(ring,stem);pin.scale.setScalar(Math.max(1,fitWidth/Math.max(1,width)*2));pin.position.copy(project(coordinate,.5));pin.renderOrder=15;measurementGroup.add(pin);
+        ring.position.y=7;stem.rotation.z=Math.PI;stem.position.y=2;pin.add(ring,stem);pin.scale.setScalar(camera.isPerspectiveCamera?Math.max(1,camera.position.distanceTo(project(coordinate))/100):Math.max(1,fitWidth/Math.max(1,width)*2));pin.position.copy(project(coordinate,.5));pin.renderOrder=15;measurementGroup.add(pin);
       }
     }
     for(const [id,mesh]of contextObjects){mesh.material.color.copy(mesh.userData.baseColor);if(id===(receipt?.feature?.id??target))mesh.material.color.set('#d0dcc2');}
@@ -626,6 +661,7 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
 
   return {
     update,
+    openDetail,closeDetail,
     setView(next){if(disposed)return;view=next==='plan'?'plan':'3d';host.dataset.sceneMode=renderer?view:'plan-fallback';if(renderer)moveCamera(focusMode);},
     focus(mode){if(disposed)return;cameraTouched=true;moveCamera(['selection','property','context','district','site'].includes(mode)||routeReceipt(mode)||placeObjects.has(mode)||candidateObjects.has(String(mode))?mode:'site');},
     rotate(){if(disposed||!controls)return;cameraTouched=true;if(view==='plan'){view='3d';moveCamera(focusMode);}controls.enableRotate=true;controls.enableDamping=false;const offset=camera.position.clone().sub(controls.target).applyAxisAngle(new THREE.Vector3(0,1,0),Math.PI/4);camera.position.copy(controls.target).add(offset);controls.update();controls.enableDamping=true;moveCamera(focusMode,false);},

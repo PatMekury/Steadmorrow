@@ -11,6 +11,7 @@ export function createScenarioAgent(options){
     for(const call of data.output??[]){
       if(call.type!=='function_call')continue;
       const args=JSON.parse(call.arguments),concept=state?.concepts.find(c=>c.id===args.concept_id);
+      if(['plan_housing_options','revise_housing_plan'].includes(call.name))for(const o of args.options??[])o.design_brief??={household:'Fictional room-budget fixture',basis:'Synthetic areas for protocol testing only.',rooms_per_home:{bedroom_areas_m2:[4],living_dining_m2:5,kitchen_m2:3,bathrooms_m2:3,storage_m2:1,other_m2:0},interior_reserve_percent:20,floor_structure_meters:.3,standards:[],unresolved_checks:['Fictional fixture, not a habitable or legal home design.']};
       if(call.name==='review_layout'&&concept&&!args.verdict)Object.assign(args,{
         plan_version:state.planVersion,evidence_version:concept.evidenceVersion,observed_receipt_ids:[concept.observationId],verdict:concept.buildingsCount?'ready-to-compare':'unresolved',
         priority_findings:state.brief.map(p=>({priority_id:p.id,status:'tradeoff',finding:'The measured cluster retains this priority for discussion; detailed delivery remains unresolved.'})),limitations:['Mapped footprints and assumed dimensions do not establish legal capacity.'],next_action:'Compare the measured arrangement with the retained alternatives.'

@@ -87,7 +87,7 @@ test('housing priority shows only current eligible calculated homes and preserve
   const result={housingRoute:'supported',version:{assessment:'current'},siteContext:{geometryVersion:'g1'}};
   const scenario={assessmentVersion:'current',concept:{status:'placed',contextVersion:'g1',buildings:[{id:'apartment',homes:12}],metrics:{homes:12}}};
   const priority={target:'homes',kind:'goal'};
-  assert.equal(priorityValue(priority,{result,scenario}),'12 homes drawn');
+  assert.equal(priorityValue(priority,{result,scenario}),'A possible housing layout');
   assert.equal(priorityValue({...priority,answer:{status:'answered',distanceMeters:509}},{result,scenario}),'509 m');
   assert.equal(priorityValue({...priority,answer:{status:'unresolved'}},{result,scenario}),'Not confirmed');
   for(const changed of [{...scenario,suppressed:true},{...scenario,visualizationAllowed:false},{...scenario,assessmentVersion:'old'}]){
