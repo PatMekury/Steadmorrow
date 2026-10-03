@@ -35,3 +35,20 @@ The user explicitly approved the actual property/Gloo check. That approval super
 The initial interpretation now receives only the original input spans plus the last interpretation/correction exchange. Full selected geometry and research context become available once interpretation succeeds. Both interpretation and passage-continuation tools have progress labels, with a generic fallback for future tools. Accepted concerns emit immediately, independently of later record success; this does not count as time to first property evidence. Validation messages remain actionable, and the argument bound accommodates the declared concern count.
 
 A new regression uses the production `createFindingsService` and its real `createResearchSession`, verifies metadata is absent from the first model request, rejects an invented task excerpt, recovers the corrected interpretation, observes progress and all three concern cards before any property lookup, and preserves the null property-evidence timing. All 250 tests and syntax checks pass. The corrected actual run is next; no successful housing finding is claimed by this service test.
+
+## Actual evidence and further integration failures
+
+The approved installed run separated the original purpose and both questions immediately, matched two parcels, and retrieved four original provisions. It finished research in 101.953 seconds (18 model requests, 18 tools) but the assessment audit twice generated abbreviated source quotations, which exact-quotation validation correctly rejected. Its automatic study obtained a 777 m walking receipt to Houston Academy for International Studies, partial among three routed candidates. This does not establish an elementary-school match, attendance eligibility or an exhaustive nearest result.
+
+A focused continuation reused the actual server session and retrieved records. It completed an assessment, but manual inspection found overly broad approval language despite the old AI audit accepting it. That draft is not an acceptance certificate. Subsequent focused tests reuse the captured original evidence and route receipt, without repeating public property discovery. Failed drafts, failed study runs and response usage remain in the workspace report.
+
+Corrections now include:
+
+- Review references select retained source excerpts rather than reconstructing truncated quotations. Every prose field receives its own source-review verdict; corrections block acceptance. Exact originals remain in the audit packet and final feedback, including housing-analysis-only citations.
+- An exception-bearing preliminary approval route must retain conditional wording in every affected clause. Validation returns all affected fields together. Questions about whether approval applies remain valid.
+- Assessment writing uses medium reasoning and a bounded ninety-second per-response allowance within the unchanged three-minute research limit; ordinary discovery remains at forty-five seconds. A live medium-reasoning writer exceeded the old limit.
+- Route attachment is validated by the exact original concern and actual street-route receipt, without requiring an old closed set of research-topic labels. A different concern's receipt and legacy direct-line measurements remain rejected.
+- Housing-option citations are restricted to retrieved source/passage IDs. Final selection requires an explicit reviewed version for every conditional option, including failed empty tests; only placed, reviewed results enter the visible comparison. Missing options produce actionable feedback.
+- Route detail describes mapped candidates and expressly leaves requested subtype, public access, operation and eligibility unverified. Open category labels cannot certify those facts.
+
+253 automated tests pass at this stage. Actual installed acceptance and the final server/commit are recorded in the workspace installation record; do not infer an end-to-end live pass from the isolated tests. Presentation work remains deferred. AI source review is not legal or expert approval.

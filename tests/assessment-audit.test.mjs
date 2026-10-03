@@ -11,13 +11,22 @@ const evidence={caseId:'test-evidence',status:'preliminary',assessmentScope:'mat
 const ref='rule::rule-p1',guide='guide::guide-p1';
 const draft=()=>({housingRoute:'supported',housingAnalysis:{support:[ref],applicability:'The residential use provision covers the matched district.',approvals:'The conditions of site review remain unresolved.',siteLimits:'Physical fit remains untested.',affordability:'Affordable delivery remains unestablished.'},assessment:{headline:'Housing may be possible, subject to site review',summary:'The recorded restrictions still need checking.',support:[guide]},findings:[{heading:'Site review',summary:'Its conditions remain unresolved.',support:[ref]}],obstacles:[{heading:'Site conditions',consequence:'The review conditions remain unresolved.',nextStep:'Confirm which conditions affect the proposed housing.',support:[ref]}]});
 const reply=(name,args,id='call')=>Response.json({status:'completed',output:[{type:'function_call',call_id:id,name,arguments:JSON.stringify(args)}]});
+const auditReply=(body,issues=[])=>{const packet=JSON.parse(body.input[0].content);return reply('record_assessment_audit',{checks:Object.keys(packet.fields).map(field=>{const issue=issues.find(i=>i.field===field);return {field,verdict:issue?'unsupported':'qualified-or-unknown',source_excerpt_id:issue?.source_excerpt_id??'not-a-factual-claim',reason:issue?.reason??'This fixture remains qualified.',correction:issue?.correction??''};})});};
 const expand=value=>{value=structuredClone(value);for(const o of [value.housingAnalysis,value.assessment,...value.findings,...value.obstacles])o.support=o.support.map(r=>{const [sourceId,passageId]=r.split('::');return {sourceId,passageId};});return {output:[{type:'message',content:[{type:'output_text',text:JSON.stringify(value)}]}]};};
 test('housing basis is independent of the short assessment citations and retains all four distinctions',()=>{
  const value=parseReview(expand(draft()),evidence.sources,evidence);assert.equal(value.housingBasis,'zoning-use');assert.equal(value.assessment.support[0].sourceId,'guide');assert.equal(value.housingAnalysis.support[0].sourceId,'rule');assert.match(value.housingAnalysis.affordability,/unestablished/);
 });
+test('an exception-bearing approval route stays conditional in every clause',()=>{
+ const exceptionRule={...rule,text:rule.text+' Small alterations are exempt from approval.'},state={...evidence,sources:[exceptionRule,guidance]};
+ const d=draft();d.housingAnalysis.approvals='New housing will require site approval; subdivision may require review if land is divided.';
+ assert.throws(()=>parseReview(expand(d),state.sources,state),/Unqualified approval obligation in housingAnalysis.approvals/);
+ d.housingAnalysis.approvals='New housing generally requires site approval unless an exemption applies; subdivision may require review if land is divided.';d.obstacles[0].nextStep='Ask whether Sec. 42 requires approval or an exception applies.';
+ assert.equal(parseReview(expand(d),state.sources,state).housingRoute,'supported');
+ d.housingAnalysis.approvals='The provision requires a development plat but lists specific exemptions; applicability depends on whether an exemption applies.';d.assessment.summary='The route supports exploration provided any required approval is obtained.';assert.equal(parseReview(expand(d),state.sources,state).housingRoute,'supported');
+});
 test('audit reads original sections including exceptions and rejects malformed acceptance',async()=>{
  const narrative=parseReview(expand(draft()),evidence.sources,evidence);let body;
- const audit=await auditAssessment({narrative,evidence,apiKey:'test-secret',model:'test',fetchImpl:async(_url,opts)=>{body=JSON.parse(opts.body);return reply('record_assessment_audit',{accepted:true,issues:[]});}});
+ const audit=await auditAssessment({narrative,evidence,apiKey:'test-secret',model:'test',fetchImpl:async(_url,opts)=>{body=JSON.parse(opts.body);return auditReply(body);}});
  assert.equal(audit.expertApproval,false);const provided=JSON.parse(body.input[0].content);assert.equal(provided.sources.find(s=>s.id==='rule').text,rule.text);assert.equal(provided.sources.find(s=>s.id==='rule').context,'Residence district A');assert(!JSON.stringify(body).includes('test-secret'));
  await assert.rejects(auditAssessment({narrative,evidence,apiKey:'test',model:'test',fetchImpl:async()=>reply('record_assessment_audit',{accepted:true,issues:[{field:'assessment.summary',reason:'Unsupported subdivision obligation',correction:'Make it conditional.'}]})}),/invalid decision/);
 });
@@ -25,7 +34,7 @@ test('source applicability rejection returns to Gloo for correction without repe
  let modelCalls=0,audits=0;const executed=[];
  const service=createFindingsService({apiKey:'test',maxRounds:5,sessionFactory:()=>({snapshot:()=>evidence,execute:async name=>{executed.push(name);return {};}}),fetchImpl:async(_url,opts)=>{
    const b=JSON.parse(opts.body);modelCalls++;
-   if(b.tools.some(t=>t.function.name==='record_assessment_audit')){audits++;return reply('record_assessment_audit',audits===1?{accepted:false,issues:[{field:'assessment.summary',claim:'The project requires subdivision approval.',sourceId:'rule',sourceQuote:'Subdivision is required only if land is divided.',reason:'Subdivision is conditional on dividing land; division has not been established.',correction:'Remove the universal subdivision requirement.'}]}:{accepted:true,issues:[]});}
+   if(b.tools.some(t=>t.function.name==='record_assessment_audit')){audits++;return auditReply(b,audits===1?[{field:'assessment.summary',source_excerpt_id:'rule::audit-1',reason:'Subdivision is conditional on dividing land; division has not been established.',correction:'Remove the universal subdivision requirement.'}]:[]);}
    if(modelCalls===1)return reply('review_evidence',{});
    const d=draft();if(audits===0)d.assessment.summary='The project requires subdivision approval.';
    else assert.match(JSON.stringify(b.input),/Subdivision is conditional/);
@@ -33,9 +42,20 @@ test('source applicability rejection returns to Gloo for correction without repe
  }});
  const r=await service(input);assert.equal(r.narrativeStatus,'ready');assert.equal(r.research.modelCalls,5);assert.equal(audits,2);assert.deepEqual(executed,['review_evidence']);assert(!r.assessment.summary.includes('requires subdivision'));assert.equal(r.sourceReview.expertApproval,false);
 });
+test('audit excerpt references retain exact exception text and reject invented references',async()=>{
+ const narrative=parseReview(expand(draft()),evidence.sources,evidence);narrative.assessment.headline='Every project requires subdivision approval.';
+ const invoke=bad=>auditAssessment({narrative,evidence,apiKey:'fixture',model:'fixture',fetchImpl:async(_,request)=>{
+  const body=JSON.parse(request.body),packet=JSON.parse(body.input[0].content);
+  const excerpt=packet.sourceExcerpts.find(x=>x.quote.includes('Subdivision is required only if land is divided.'));
+  assert(excerpt);assert.equal(packet.fields['assessment.headline'],narrative.assessment.headline);
+  return auditReply(body,[{field:'assessment.headline',source_excerpt_id:bad?'invented':excerpt.id,reason:'Subdivision is conditional on dividing land.',correction:'State the actual trigger.'}]);
+ }});
+ const result=await invoke(false);assert.equal(result.issues[0].claim,narrative.assessment.headline);assert.ok(rule.text.includes(result.issues[0].sourceQuote));assert.match(result.issues[0].sourceQuote,/only if land is divided/);
+ await assert.rejects(invoke(true),/invalid decision/);
+});
 test('failed review can resume the same sources with a new signal and no new session',async()=>{
  let sessions=0,calls=0,renewed=0,fail=true;
- const service=createFindingsService({apiKey:'test',sessionFactory:()=>{sessions++;return {snapshot:()=>evidence,execute:async()=>({}),renewSignal:()=>{renewed++;}};},fetchImpl:async(_url,opts)=>{calls++;const b=JSON.parse(opts.body);if(b.tools.some(t=>t.function.name==='record_assessment_audit'))return fail?new Response('',{status:503}):reply('record_assessment_audit',{accepted:true,issues:[]});if(!b.tools.some(t=>t.function.name==='submit_assessment'))return reply('review_evidence',{});return reply('submit_assessment',draft());}});
+ const service=createFindingsService({apiKey:'test',sessionFactory:()=>{sessions++;return {snapshot:()=>evidence,execute:async()=>({}),renewSignal:()=>{renewed++;}};},fetchImpl:async(_url,opts)=>{calls++;const b=JSON.parse(opts.body);if(b.tools.some(t=>t.function.name==='record_assessment_audit'))return fail?new Response('',{status:503}):auditReply(b);if(!b.tools.some(t=>t.function.name==='submit_assessment'))return reply('review_evidence',{});return reply('submit_assessment',draft());}});
  const first=await service(input);assert.equal(first.narrativeStatus,'unavailable');assert.equal(first.parcel.id,'test-parcel');fail=false;
  const second=await service(input);assert.equal(second.narrativeStatus,'ready');assert.equal(second.research.resumedEvidence,true);assert.equal(sessions,1);assert.equal(renewed,1);assert(calls<10);
 });

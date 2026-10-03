@@ -22,7 +22,7 @@ export function explicitSelections(args,{options,concepts,reviews,planVersion}){
     ids.add(option.id);explored.push({...option,concept,review,reviewed:true,rationale:choice.rationale});
   }
   for(const id of args.unresolved_option_ids){const option=options.find(o=>o.id===id);if(!option||ids.has(id)||option.useStatus!=='unresolved')throw new Error('Only options with explicit unresolved use evidence can be omitted from tests.');ids.add(id);explored.push({...option,concept:null,reviewed:false});}
-  if(options.some(o=>!ids.has(o.id)))throw new Error('Every planned option needs an explicit selected version or unresolved disposition.');
+  if(options.some(o=>!ids.has(o.id)))throw new Error('Every planned option needs an explicit selected version or unresolved disposition. Missing: '+options.filter(o=>!ids.has(o.id)).map(o=>o.id).join(', ')+'. Include the exact reviewed no-fit test for a failed conditional option in selections; it stays in exploration history, not the displayed alternatives.');
   if(!explored.some(o=>o.concept?.id===args.concept_id))throw new Error('The recommendation must be one of the explicit selections.');
   return explored;
 }
