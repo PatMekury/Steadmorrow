@@ -1,5 +1,6 @@
 /* The supplied Outfit / paper / matte-city reference governs this work surface. */
 .priority-tile[data-answer-state="pending"] .priority-answer{color:#555}.site-popover .height-source-meta{font-size:16px;line-height:24px;color:#626262}.site-popover a+a{margin-left:16px}
+@media(min-width:800px){.site-surface:has(>.site-popover:not([hidden])) .site-camera-controls{left:auto;right:14px;transform:none}}
 .scene-attribution+.scene-attribution{margin-left:18px}
 .findings-step .work-banner[data-state="saved"]{background:#f6f6f6;color:#0e0e0e}.work-banner[data-state="saved"]:after{display:none}.work-banner[data-state="saved"] .work-banner-phase{color:#636363;opacity:1}
 html.findings-active .experience.land-experience{margin-top:0;padding-top:20px}
