@@ -72,6 +72,14 @@ test('agent can fit a reviewed home brief and select only after critiquing the m
  assert.ok(result.concept.buildings.length);assert.ok(result.concept.designCheck.grossOrAllocatedAreaPerHome>=result.concept.designBrief.minimumAllocatedAreaPerHomeSquareMeters);
  assert.equal(result.concept.diagnostics.sizingSearch.exhaustive,false);
 });
+test('unresolved housing can finish factual work without impossible housing-option planning',async()=>{
+ const entry=makeEntry('Effects on neighbors');entry.result.housingRoute='unresolved';
+ const m=scripted(entry,[['interpret_priorities',{items:[purpose,{label:'Effects',meaning:'Understand surrounding effects',original_excerpt:'Effects on neighbors',kind:'requirement',target:'whole-site',research_topic:'surrounding environment',measurement_needed:'proposal-surroundings'}]}],(s,p)=>{
+  assert.ok(!p.tools.some(t=>['plan_housing_options','test_layout','fit_layout'].includes(t.function.name)));
+  return ['note_priority_gap',{priority_id:'priority-1',reason:'Housing permission remains unresolved, so there is no proposed building to measure. The surrounding structures and environmental effects still need checking.'}];
+ },(s,p)=>{assert.ok(p.tools.some(t=>t.function.name==='finish_unresolved_study'));return ['finish_unresolved_study',{}];}],{optionCount:3});
+ const result=await m.run({assessmentVersion:ref});assert.equal(result.status,'needs-evidence');assert.equal(result.options.length,0);assert.equal(result.brief[1].answer.status,'unresolved');assert.equal(result.concept,null);
+});
 
 test('mixed clauses and more than four concerns are covered without a preset research taxonomy',async()=>{
  const matters='Keep the hall and check community restrictions; compare shadow effects; check construction noise; check tree loss; check service capacity';

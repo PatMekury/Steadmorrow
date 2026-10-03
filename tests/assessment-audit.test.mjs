@@ -53,6 +53,18 @@ test('audit excerpt references retain exact exception text and reject invented r
  const result=await invoke(false);assert.equal(result.issues[0].claim,narrative.assessment.headline);assert.ok(rule.text.includes(result.issues[0].sourceQuote));assert.match(result.issues[0].sourceQuote,/only if land is divided/);
  await assert.rejects(invoke(true),/invalid decision/);
 });
+
+test('correcting an unrelated draft error does not suppress targeted housing-source recovery',async()=>{
+ let n=0,recovered=false;const executed=[];
+ const service=createFindingsService({apiKey:'fixture',maxRounds:12,assessmentAuditor:null,sessionFactory:()=>({snapshot:()=>evidence,execute:async name=>{executed.push(name);return {};}}),fetchImpl:async(_,request)=>{
+  const b=JSON.parse(request.body);n++;
+  if(n===1||n===5)return reply('review_evidence',{},'review-'+n);
+  if(n===4){assert.match(JSON.stringify(b.input),/follow-up-needed/);recovered=true;return reply('read_code_sections',{section_ids:['original-section']},'source');}
+  const d=draft();if(n<4)d.housingRoute='unresolved';if(n===2)d.assessment.summary='The project requires subdivision approval.';
+  return reply('submit_assessment',d,'draft-'+n);
+ }});
+ const result=await service(input);assert.equal(recovered,true);assert.deepEqual(executed,['review_evidence','read_code_sections','review_evidence']);assert.equal(result.narrativeStatus,'ready');assert.equal(n,6);
+});
 test('audit permits an editorial note on a qualified recommendation but cannot omit a field',async()=>{
  const narrative=parseReview(expand(draft()),evidence.sources,evidence);
  const invoke=omit=>auditAssessment({narrative,evidence,apiKey:'fixture',model:'fixture',fetchImpl:async(_,request)=>{const body=JSON.parse(request.body),replyData=await auditReply(body).json(),decision=JSON.parse(replyData.output[0].arguments);decision.checks.at(-1).correction='This is a recommended next step, not an affirmative source claim.';if(omit)decision.checks.pop();return reply('record_assessment_audit',decision);}});

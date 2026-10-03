@@ -13,7 +13,7 @@ for(const changed of ['source evidence','context geometry'])test(`late ${changed
     if(++checks===3){if(changed==='source evidence')evidence.caseId='d'.repeat(20);else evidence.siteContext={...evidence.siteContext,geometryVersion:'e'.repeat(20),version:'context-b'};}
     return {status:'reviewed',evidenceVersion:evidence.caseId};
   }};
-  const entry={session,input:{priorities:{purpose:'Housing',matters:'',choices:[]}}},oldIds=new Set(),diagnostics=[];
+  const entry={session,result:{housingRoute:'supported'},input:{priorities:{purpose:'Housing',matters:'',choices:[]}}},oldIds=new Set(),diagnostics=[];
   let calls=0,currentId,invalidatedNotice=false;
   const fetchImpl=async(_url,options)=>{
     const payload=JSON.parse(options.body),outputs=payload.input.filter(i=>i.type==='function_call_output').map(i=>JSON.parse(i.output));
