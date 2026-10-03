@@ -547,7 +547,7 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
     }
   }
 
-  function routeReceipt(target){return [...(currentResult.priorityMeasurements??[]),...(currentScenario?.brief??[]).map(p=>p.answer)].find(m=>m?.feature?.id===target&&m.distanceType==='street-route'&&m.route?.geometry?.type==='LineString');}
+  function routeReceipt(target){return [...(currentResult.priorityMeasurements??[]),...(currentScenario?.brief??[]).map(p=>p.answer)].map(m=>m?.measurement??m).find(m=>m?.id===target&&m.distanceType==='street-route'&&m.route?.geometry?.type==='LineString');}
   function streetMesh(points,width,material,height){
     const flat=streetTriangles(points,width),vertices=[];for(let i=0;i<flat.length;i+=2)vertices.push(flat[i],height,flat[i+1]);
     const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));g.computeVertexNormals();return new THREE.Mesh(g,material);
@@ -567,10 +567,10 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
         ring.position.y=7;stem.rotation.z=Math.PI;stem.position.y=2;pin.add(ring,stem);pin.scale.setScalar(Math.max(1,fitWidth/Math.max(1,width)*2));pin.position.copy(project(coordinate,.5));pin.renderOrder=15;measurementGroup.add(pin);
       }
     }
-    for(const [id,mesh]of contextObjects){mesh.material.color.copy(mesh.userData.baseColor);if(id===target)mesh.material.color.set('#d0dcc2');}
+    for(const [id,mesh]of contextObjects){mesh.material.color.copy(mesh.userData.baseColor);if(id===(receipt?.feature?.id??target))mesh.material.color.set('#d0dcc2');}
     const selectedCandidate=candidateObjects.get(String(target));
     for(const mesh of new Set(candidateObjects.values()))mesh.material.opacity=mesh===selectedCandidate ? .72 : .42;
-    for(const[id,marker]of placeObjects)marker.visible=id===target||id===focusMode;
+    for(const[id,marker]of placeObjects)marker.visible=id===(receipt?.feature?.id??target)||id===(routeReceipt(focusMode)?.feature?.id??focusMode);
     proposalMaterial.color.set(target==='homes'||target==='height'?'#d8ebd7':'#f1f0e9');
     selectionMaterial.opacity=target==='land'||target==='selection'?.8:.56;
     requestRender();
@@ -627,7 +627,7 @@ export function createSiteScene(host, {result, scenario, onSelectFeature, onRead
   return {
     update,
     setView(next){if(disposed)return;view=next==='plan'?'plan':'3d';host.dataset.sceneMode=renderer?view:'plan-fallback';if(renderer)moveCamera(focusMode);},
-    focus(mode){if(disposed)return;cameraTouched=true;moveCamera(['selection','property','context','district','site'].includes(mode)||placeObjects.has(mode)||candidateObjects.has(String(mode))?mode:'site');},
+    focus(mode){if(disposed)return;cameraTouched=true;moveCamera(['selection','property','context','district','site'].includes(mode)||routeReceipt(mode)||placeObjects.has(mode)||candidateObjects.has(String(mode))?mode:'site');},
     rotate(){if(disposed||!controls)return;cameraTouched=true;if(view==='plan'){view='3d';moveCamera(focusMode);}controls.enableRotate=true;controls.enableDamping=false;const offset=camera.position.clone().sub(controls.target).applyAxisAngle(new THREE.Vector3(0,1,0),Math.PI/4);camera.position.copy(controls.target).add(offset);controls.update();controls.enableDamping=true;moveCamera(focusMode,false);},
     setHighlight,
     getAnchors(){if(!renderer||!hasMeasuredSize||!host.isConnected)return {};camera.updateMatrixWorld();return Object.fromEntries([...anchors].map(([id,p])=>{const a=screenAnchor(p);if(contextObjects.has(id)&&!contextObjects.get(id).visible)a.visible=false;return[id,a];}));},

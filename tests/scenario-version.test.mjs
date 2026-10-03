@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createScenarioAgent} from '../scripts/scenario-agent.mjs';
+import {createScenarioAgent} from './decision-fixtures.mjs';
 
 const geometry=[[[[-95,30],[-94.999,30],[-94.999,30.001],[-95,30.001],[-95,30]]]];
 const parameters={width:6,depth:9,storeys:2,storey_height:3,spacing:3,edge_clearance:3,angle:0,homes:12,parking_spaces:2};

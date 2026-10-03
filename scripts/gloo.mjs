@@ -1,6 +1,8 @@
+import {studyView} from './study-context.mjs';
+import {memoryLedger,traceModelFetch,executionReceipt} from './run-ledger.mjs';
 import {auditAssessment} from './assessment-audit.mjs';
 import {housingEvidenceBasis,regulatoryPath} from './regulatory-path.mjs';
-import {createScenarioAgent} from './scenario-agent.mjs';
+import {createScenarioAgent,interpretationInstructions} from './scenario-agent.mjs';
 import {runChosenTools} from './tool-scheduler.mjs';
 import {privateInputFields,privacyMessage} from '../input-privacy.js';
 import { createHash } from 'node:crypto';
@@ -151,39 +153,42 @@ export function assessmentSubmission(sources,context,evidence={}){
   }};
 }
 
-export function createFindingsService({apiKey,model='gloo-openai-gpt-5-mini',fetchImpl=fetch,now=Date.now,timeoutMs=45000,runTimeoutMs=180000,maxRounds=20,maxToolCalls=32,sessionFactory=createResearchSession,onDiagnostic=()=>{},assessmentAuditor=auditAssessment}={}){
+export function createFindingsService({apiKey,model='gloo-openai-gpt-5-mini',fetchImpl=fetch,now=Date.now,timeoutMs=45000,runTimeoutMs=180000,maxRounds=20,maxToolCalls=32,sessionFactory=createResearchSession,onDiagnostic=()=>{},assessmentAuditor=auditAssessment,ledgerFactory=memoryLedger,codeHash}={}){
   const cache=new Map(),pending=new Map(),contexts=new Map(),checkpoints=new Map();let runs=[],scenarioRuns=0;
   const reserve=()=>{runs=runs.filter(t=>now()-t<60000);if(runs.length>=4||pending.size+scenarioRuns>=2)throw new FindingsError(429,'The research agent is busy. Please try again shortly.');runs.push(now());scenarioRuns++;return ()=>{scenarioRuns--;};};
   const read=createEvidenceClient({now}),webRead=createPublicWebClient({now});
   const review=async(input,{onProgress=()=>{}}={})=>{
+    if(input?.executionIntent!==undefined&&!['reuse','fresh','continue'].includes(input.executionIntent))throw new FindingsError(400,'Choose a valid findings action.');
+    const executionIntent=input?.executionIntent??'reuse';
     const normalized=validateInput(input),key=createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
-    const saved=cache.get(key);if(saved&&saved.value.narrativeStatus!=='unavailable'&&now()-saved.time<(saved.value.narrativeStatus==='ready'?900000:30000))return structuredClone({...saved.value,scenario:contexts.get(saved.value.version?.assessment)?.scenario??null});
-    if(pending.has(key)){const entry=pending.get(key);entry.listeners.add(onProgress);if(entry.latest())onProgress(entry.latest());try{return structuredClone(await entry.promise);}finally{entry.listeners.delete(onProgress);}}
+    const saved=cache.get(key);if(executionIntent==='reuse'&&saved&&saved.value.narrativeStatus!=='unavailable'&&now()-saved.time<(saved.value.narrativeStatus==='ready'?900000:30000))return structuredClone({...saved.value,execution:executionReceipt({ledgerFactory,parentRunId:saved.value.research?.trace?.runId,input:normalized,code:codeHash,action:'cached',ageMs:now()-saved.time,executionIntent}),scenario:contexts.get(saved.value.version?.assessment)?.scenario??null});
+    if(pending.has(key)){const entry=pending.get(key);entry.listeners.add(onProgress);if(entry.latest())onProgress(entry.latest());try{const value=await entry.promise;return structuredClone({...value,execution:executionReceipt({ledgerFactory,parentRunId:value.research?.trace?.runId,input:normalized,code:codeHash,action:'rejoined',executionIntent})});}finally{entry.listeners.delete(onProgress);}}
     if(!apiKey)throw new FindingsError(503,'The Gloo research agent is not connected. Your selected area and priorities are saved.');
     runs=runs.filter(t=>now()-t<60000);if(runs.length>=4||pending.size+scenarioRuns>=2)throw new FindingsError(429,'The research agent is busy. Please try again shortly.');runs.push(now());
     const listeners=new Set([onProgress]);
     let latestProgress,latestEvidence;
     const emit=value=>{latestProgress=typeof value==='string'?{message:value}:value;if(latestProgress.evidence)latestEvidence=latestProgress;for(const listener of listeners){try{listener(latestProgress);}catch{}}};
     const promise=(async()=>{
-      const started=now(),modelTimings=[];let firstEvidenceMs=null,lastEvidenceStamp='';
+      const started=now(),modelTimings=[];const ledger=ledgerFactory({phase:'research',parentRunId:checkpoints.get(key)?.runId??cache.get(key)?.value.research?.trace?.runId,input:normalized,prompt:instructions,code:codeHash,executionIntent});const modelFetch=traceModelFetch(fetchImpl,ledger);let firstEvidenceMs=null,lastEvidenceStamp='';
       const signal=AbortSignal.timeout(runTimeoutMs);
-      const previous=checkpoints.get(key),resume=previous&&now()-previous.at<3600000?previous:null;
+      const previous=checkpoints.get(key),resume=executionIntent!=='fresh'&&previous&&now()-previous.at<3600000?previous:null;
       const session=resume?.session??sessionFactory(normalized,{now,signal,read,webRead});
       if(resume)session.renewSignal?.(signal);
       const history=[{role:'user',content:JSON.stringify({task:'Research this selected property and explain the supported housing route and consequential gaps.',selectedArea:normalized.points,userQuery:normalized.query,priorities:normalized.priorities,parcelKey:normalized.parcelKey})}];
       const events=[],seen=resume?.seen??new Map();let toolCalls=0,modelCalls=0,reviewed=false,housingRecovery=0,outputRecovery=0,unsupportedEvidenceVersion=null,lastIssue=resume?.lastIssue??null;
       const failedDrafts=new Set();let draftFailures=0,auditAttempts=0;
       if(resume){history.push({role:'user',content:JSON.stringify({instruction:'Resume this exact investigation from its retained sources and completed lookups. Review evidence, then repair the remaining assessment issue. Do not redo parcel, context or routes unless a specific failure requires it.',currentEvidence:session.context?.()??session.snapshot(),lastIssue})});emit({message:'Continuing the housing assessment from the records already found…',evidence:session.snapshot()});}
+      const compactContent=content=>{try{return JSON.stringify(studyView(JSON.parse(content)));}catch{return content;}};
       const compactHistory=()=>{
         const lastCall=history.findLast(e=>e.type==='function_call'),lastOutput=lastCall&&history.findLast(e=>e.type==='function_call_output'&&e.call_id===lastCall.call_id);
         const retained=lastOutput?[lastCall,lastOutput]:[];
         history.splice(1,history.length-1,{role:'user',content:JSON.stringify({completedResearch:events.map(({tool,arguments:args,outcome})=>({tool,args,outcome})),currentEvidence:lastCall?.name==='review_evidence'&&lastOutput?.output?.includes('sources')?undefined:session.context?.()??session.snapshot(),instruction:'This is the current sourced state of your completed tool calls, condensed to remove duplicate navigation and passages. Continue from this evidence, inspect unresolved checks, and choose further tools when needed. All original source IDs and passages remain authoritative; do not invent earlier results.'})},...retained);
       };
-      const finish=(extra={})=>{if(extra.narrativeStatus==='unavailable'){checkpoints.set(key,{session,seen,lastIssue,at:now()});if(checkpoints.size>16)checkpoints.delete(checkpoints.keys().next().value);}else checkpoints.delete(key);const result={...session.snapshot(),...extra,research:{resumedEvidence:Boolean(resume),mode:'gloo-tool-agent',model,modelCalls,toolCalls,events,durationMs:now()-started,firstEvidenceMs,modelTimings},provider:'Gloo AI'};result.version={evidence:result.caseId,assessment:createHash('sha256').update(JSON.stringify([result.caseId,normalized.priorities,result.assessment??null,result.findings??null,result.obstacles??null,result.housingAnalysis??null,result.housingRoute??null])).digest('hex').slice(0,20),scenario:null};contexts.set(result.version.assessment,{session,input:normalized,result,at:now()});if(contexts.size>32)contexts.delete(contexts.keys().next().value);onDiagnostic({type:'agent-completed',durationMs:result.research.durationMs,firstEvidenceMs:result.research.firstEvidenceMs,narrativeStatus:result.narrativeStatus,codeCount:result.code.length,modelCalls,toolCalls,events:events.map(({tool,outcome})=>({tool,outcome}))});return result;};
+      const finish=(extra={})=>{ledger.record({type:'terminal',status:extra.narrativeStatus??'partial',evidenceVersion:session.snapshot().caseId});if(extra.narrativeStatus==='unavailable'){checkpoints.set(key,{session,seen,lastIssue,at:now(),runId:ledger.id});if(checkpoints.size>16)checkpoints.delete(checkpoints.keys().next().value);}else checkpoints.delete(key);const result={...session.snapshot(),...extra,research:{trace:ledger.summary(),resumedEvidence:Boolean(resume),mode:'gloo-tool-agent',model,modelCalls,toolCalls,events,durationMs:now()-started,firstEvidenceMs,modelTimings},provider:'Gloo AI',execution:{action:resume?'continued':executionIntent==='fresh'?'fresh':'started',runId:ledger.id}};result.version={evidence:result.caseId,assessment:createHash('sha256').update(JSON.stringify([result.caseId,normalized.priorities,result.assessment??null,result.findings??null,result.obstacles??null,result.housingAnalysis??null,result.housingRoute??null])).digest('hex').slice(0,20),scenario:null};contexts.set(result.version.assessment,{session,input:normalized,result,at:now()});if(contexts.size>32)contexts.delete(contexts.keys().next().value);onDiagnostic({type:'agent-completed',durationMs:result.research.durationMs,firstEvidenceMs:result.research.firstEvidenceMs,narrativeStatus:result.narrativeStatus,codeCount:result.code.length,modelCalls,toolCalls,events:events.map(({tool,outcome})=>({tool,outcome}))});return result;};
       try{
         for(let round=0;modelCalls<maxRounds;round++){
           signal.throwIfAborted();
-          if(JSON.stringify(history).length>150000)compactHistory();
+          if(JSON.stringify(history).length>90000)compactHistory();
           modelCalls++;emit(round?'Checking what the findings mean for your land…':'Gloo is planning the property research…');
           const remaining=session.requiredFollowUps?.()??[];
           // Reserve the last three model calls for Gloo's evidence review, a
@@ -204,12 +209,13 @@ export function createFindingsService({apiKey,model='gloo-openai-gpt-5-mini',fet
           }
           if(finalTurn)history.push({role:'user',content:JSON.stringify({finalEvidence,unfinishedChecks:remaining,instruction:'Use submit_assessment to submit the complete assessment. Its support arrays contain exact source::passage references from the tool schema; include support in assessment, every finding and every obstacle. Do not return free prose or JSON outside the tool. Use only the current evidence and the supplied references. If useful original evidence is available and jurisdiction is stable, provide a cited partial assessment even when the housing route remains unresolved, rather than a researchStatus-only response. Describe what the retained facts establish and the specific unresolved condition; do not imply missing checks passed. If a required check or the appropriate regulatory path remains unresolved, set housingRoute to unresolved. No further lookups are available. Correct any prior validation error without weakening citations or inventing capacity.'})});
           const modelStarted=now();
-          const response=await fetchImpl(endpoint,{method:'POST',redirect:'error',signal:AbortSignal.any([signal,AbortSignal.timeout(timeoutMs)]),headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json'},body:JSON.stringify({model,instructions:instructions+'\nWhen GIS/catalogue or code publishers fail, use discover_official_sources and read_official_source. Follow returned links to assessor/GIS services and original HTML/PDF provisions. A GIS link needs kind parcel or zoning, followed by read_map_source. A directory, navigation page or search title is not a parcel or law. PDF page_start selects physical file pages; inspect table headings and footnotes, use the next pages where necessary, and do not claim unseen pages were checked. County guidance cannot establish a municipal housing allowance. Original publication currency remains unverified. Recover using alternate official links, never bypass access blocks. Avoid exhausting the run on generic homepages; prioritize assessor, parcel, zoning code and operative residential-use links.',input:history,tools:offeredTools,tool_choice:submission?'required':finalTurn?'none':round===0||reviewTurn||remaining.length||!reviewed?'required':'auto',max_output_tokens:7000,reasoning:{effort:'low'}})});
+          const response=await modelFetch(endpoint,{method:'POST',redirect:'error',signal:AbortSignal.any([signal,AbortSignal.timeout(timeoutMs)]),headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json'},body:JSON.stringify({model,instructions:session.snapshot().concernBrief===null?interpretationInstructions.replace('interpret_priorities','interpret_concerns'):instructions+'\nInterpret all original inputs first with interpret_concerns. Distinguish multiple concerns and types in the same sentence; use any topic and preserve each original span. Inspect source inventory metadata and read_source_passages for omitted text and exceptions. Bound observations retain display geometry on the server. Community or private restrictions need actual applicable documents, and absence of records is unresolved. When GIS/catalogue or code publishers fail, use discover_official_sources and read_official_source. Follow returned links to assessor/GIS services and original HTML/PDF provisions. A GIS link needs kind parcel or zoning, followed by read_map_source. A directory, navigation page or search title is not a parcel or law. PDF page_start selects physical file pages; inspect table headings and footnotes, use the next pages where necessary, and do not claim unseen pages were checked. County guidance cannot establish a municipal housing allowance. Original publication currency remains unverified. Recover using alternate official links, never bypass access blocks. Avoid exhausting the run on generic homepages; prioritize assessor, parcel, zoning code and operative residential-use links.',input:history.map(item=>item.content?{...item,content:compactContent(item.content)}:item),tools:offeredTools,tool_choice:submission?'required':finalTurn?'none':round===0||reviewTurn||remaining.length||!reviewed?'required':'auto',max_output_tokens:7000,reasoning:{effort:'low'}})});
           if(!response.ok){await response.body?.cancel();throw new Error(`upstream-${response.status}`);}
           const reader=response.body.getReader(),chunks=[];let size=0;
           while(true){const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>300000){await reader.cancel();throw new Error('response-limit');}chunks.push(part.value);}
           const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));
           modelTimings.push({round:round+1,durationMs:now()-modelStarted,inputCharacters:JSON.stringify(history).length});
+          ledger.record({type:'model',phase:'research',model,modelId:data.model,responseId:data.id,usage:data.usage});
           onDiagnostic({type:'model-output',round,response:data});
           if(data.status==='incomplete'){if(outputRecovery++<1&&round<maxRounds-1){compactHistory();history.push({role:'user',content:'The previous response exhausted its output allowance and was not used. Continue from the retained evidence, keeping the requested JSON concise and all citations valid.'});continue;}throw new Error('incomplete');}if(!Array.isArray(data.output))throw new Error('incomplete');
           const requested=data.output.filter(item=>item.type==='function_call');
@@ -243,7 +249,7 @@ export function createFindingsService({apiKey,model='gloo-openai-gpt-5-mini',fet
                   if(call.name==='review_evidence')reviewed=true;else{reviewed=false;seen.set(signature,result);}
                 }
                 if(result.status&&outcome!=='reused')outcome=result.status;
-              }catch(error){outcome='failed';result={status:'tool-error',message:/^(Unknown|Invalid|Unexpected|Missing|Choose|Resolve|Jurisdiction|No connected|Chapter|Source|Unsupported|Incomplete)/.test(error.message)?error.message:'The source lookup failed or timed out. Try an alternative source or query; do not infer absence.'};}
+              }catch(error){outcome='failed';result={status:'tool-error',message:/^(Unknown|Invalid|Unexpected|Missing|Choose|Resolve|Jurisdiction|No connected|Chapter|Source|Unsupported|Incomplete|Interpret|Each concern)/.test(error.message)?error.message:'The source lookup failed or timed out. Try an alternative source or query; do not infer absence.'};}
               events.push({tool:call.name,arguments:args??{},outcome,durationMs:now()-start,finishedMs:now()-started});
               const evidence=session.snapshot();
               const stamp=JSON.stringify([evidence.parcel?.key,evidence.sources.map(s=>[s.id,s.hash]),evidence.siteContext?.version,evidence.priorityMeasurements?.map(m=>m.id)]);
@@ -251,7 +257,7 @@ export function createFindingsService({apiKey,model='gloo-openai-gpt-5-mini',fet
                 firstEvidenceMs??=now()-started;lastEvidenceStamp=stamp;
                 emit({message:progressLabels[call.name],evidence:{...evidence,narrativeStatus:'researching'},elapsedMs:now()-started});
               }
-              return {type:'function_call_output',call_id:call.call_id,output:JSON.stringify(result)};
+              ledger.observation(call.name,args??{},result,call.call_id);return {type:'function_call_output',call_id:call.call_id,output:JSON.stringify(studyView(result))};
             },call=>{try{return session.toolLane?.(call.name,JSON.parse(call.arguments||'{}'))??'exclusive';}catch{return 'exclusive';}});
             history.push(...outputs);
             if(requested.some(c=>c.name==='review_evidence'))compactHistory();
@@ -277,7 +283,7 @@ export function createFindingsService({apiKey,model='gloo-openai-gpt-5-mini',fet
               if(modelCalls>=maxRounds||auditAttempts>=2)return finish({narrativeStatus:'unavailable',researchError:'assessment-review-incomplete',narrativeMessage:'The source review has not finished. Your retrieved records are kept for a focused retry.'});
               emit('Checking the housing conclusion against the original rules…');
               modelCalls++;auditAttempts++;const auditStarted=now();
-              const audit=await assessmentAuditor({narrative,evidence,apiKey,model,fetchImpl,signal:AbortSignal.any([signal,AbortSignal.timeout(timeoutMs)])});
+              const audit=await assessmentAuditor({narrative,evidence,apiKey,model,fetchImpl:modelFetch,signal:AbortSignal.any([signal,AbortSignal.timeout(timeoutMs)]),ledger});
               modelTimings.push({phase:'assessment-audit',durationMs:now()-auditStarted});
               onDiagnostic({type:'assessment-audit',audit,narrative,evidence});
               if(!audit.accepted)throw new Error('Source applicability review: '+JSON.stringify(audit.issues));
@@ -309,7 +315,7 @@ export function createFindingsService({apiKey,model='gloo-openai-gpt-5-mini',fet
   // Compatibility route shares the SAME agent run; it is not a deterministic
   // prefetch path. The browser now starts one run after priorities are entered.
   review.records=review;
-  review.scenario=createScenarioAgent({apiKey,model,fetchImpl,now,reserve,onDiagnostic,resolveContext:id=>{const c=contexts.get(id);return c&&now()-c.at<3600000?c:null;}});
+  review.scenario=createScenarioAgent({apiKey,model,fetchImpl,now,reserve,onDiagnostic,ledgerFactory,codeHash,resolveContext:id=>{const c=contexts.get(id);return c&&now()-c.at<3600000?c:null;}});
   return review;
 }
 

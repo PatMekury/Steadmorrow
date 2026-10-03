@@ -27,7 +27,7 @@ test('unchanged reviews cannot grow the conversation; evidence changes reopen re
   if(requests===1||requests===8)assert.ok(reviewOffered);else assert.equal(reviewOffered,false);
   if(requests===7){evidence.caseId='c'.repeat(20);evidence.sources[0].passages[0].text='Changed qualified source.';}
   if(requests===9){assert.equal(state.propertyEvidence.sources[0].passages[0].text,'Changed qualified source.');throw new Error('fixture finished');}
-  const first=requests===0;requests++;return new Response(JSON.stringify({status:'completed',output:[{type:'function_call',call_id:'call-'+requests,name:first?'interpret_priorities':'review_evidence',arguments:first?JSON.stringify({items:[{label:'Housing',meaning:'Explore housing',original_excerpt:'affordable housing',kind:'goal',target:'homes'}]}):'{}'}]}));
+  const first=requests===0;requests++;return new Response(JSON.stringify({status:'completed',output:[{type:'function_call',call_id:'call-'+requests,name:first?'interpret_priorities':'review_evidence',arguments:first?JSON.stringify({items:[{label:'Housing',meaning:'Explore housing',original_excerpt:'affordable housing',kind:'goal',target:'homes'},{label:'Police route',meaning:'Check the requested route',original_excerpt:'nearest police station',kind:'question',target:'whole-site',research_topic:'place-route'}]}):'{}'}]}));
  }});
  await assert.rejects(run({assessmentVersion:'a'.repeat(20)}),/repeated validation failures/);
  assert.equal(executions,1);assert.equal(evidence.priorityMeasurements[0].route.streets[0].geometry.length,20000);

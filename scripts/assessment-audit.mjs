@@ -1,7 +1,7 @@
 // A separate Gloo reading checks the proposed claims against the original text.
 // This is an AI consistency review, never a legal approval or expert certification.
-export async function auditAssessment({narrative,evidence,apiKey,model,fetchImpl=fetch,signal}){
-  const cited=new Set([narrative.housingAnalysis,...[narrative.assessment,...narrative.findings,...narrative.obstacles]].filter(Boolean).flatMap(x=>x.support??[]).map(x=>x.sourceId));
+export async function auditAssessment({narrative,evidence,apiKey,model,fetchImpl=fetch,signal,ledger}){
+  const cited=new Set([...(narrative.housingAnalysis?.support??[]),...(narrative.assessment?.support??[]),...(narrative.findings??[]).flatMap(x=>x.support??[]),...(narrative.obstacles??[]).flatMap(x=>x.support??[])].map(ref=>ref.sourceId));
   const sources=evidence.sources.filter(s=>cited.has(s.id)||evidence.planningSystem?.sources?.some(p=>p.id===s.id)).map(s=>({id:s.id,kind:s.kind,title:s.title,context:s.context,scope:s.scope,scopeConflict:s.scopeConflict,tableDistricts:s.tableDistricts,truncated:s.truncated,text:s.text}));
   // Do not silently cut an exception off a cited law.
   if(JSON.stringify(sources).length>100000)throw new Error('Assessment review needs fewer cited provisions; the original text exceeds the bounded review context.');
@@ -15,9 +15,11 @@ export async function auditAssessment({narrative,evidence,apiKey,model,fetchImpl
   const reader=response.body.getReader(),chunks=[];let size=0;
   while(true){const p=await reader.read();if(p.done)break;size+=p.value.byteLength;if(size>60000){await reader.cancel();throw new Error('Assessment review response exceeded its limit.');}chunks.push(p.value);}
   const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  ledger?.record({type:'model',phase:'assessment-audit',model,modelId:data.model,responseId:data.id,usage:data.usage});
   const calls=data.output?.filter(c=>c.type==='function_call')??[];
   if(data.status==='incomplete'||calls.length!==1||calls[0].name!=='record_assessment_audit')throw new Error('Assessment source review returned no complete decision.');
   const result=JSON.parse(calls[0].arguments);
   if(typeof result.accepted!=='boolean'||!Array.isArray(result.issues)||result.issues.length>4||result.accepted!==(result.issues.length===0)||result.issues.some(i=>!i||!Object.hasOwn(fields,i.field)||typeof i.claim!=='string'||!i.claim.trim()||!fields[i.field].includes(i.claim)||!sources.some(s=>s.id===i.sourceId&&typeof i.sourceQuote==='string'&&i.sourceQuote.trim().length>=20&&s.text.includes(i.sourceQuote))||['reason','correction'].some(k=>typeof i[k]!=='string'||!i[k].trim()||i[k].length>400)))throw new Error('Assessment source review returned an invalid decision.');
+  ledger?.record({type:'review',phase:'assessment-audit',status:result.accepted?'accepted':'rejected',arguments:result});
   return {...result,method:'independent-gloo-source-review',expertApproval:false};
 }

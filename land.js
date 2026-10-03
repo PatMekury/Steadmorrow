@@ -577,7 +577,7 @@ function restoreFindingsVisit() {
     if(!saved)return;
     parcelKey=saved.input.parcelKey;parcelShape=JSON.stringify(points);
     lastFindings=saved.lastFindings;scenarioResult=saved.scenario;simulationState=saved.simulationState;restoredVisit=saved;
-    if(simulationState.question&&lastFindings.result.version?.assessment)studyQuestions.set(lastFindings.result.version.assessment,{question:simulationState.question,brief:simulationState.brief,refinement:simulationState.refinement});
+    if(simulationState.question&&lastFindings.result.version?.assessment)studyQuestions.set(lastFindings.result.version.assessment,{question:simulationState.question,brief:simulationState.brief,refinement:simulationState.refinement,clarification:{id:simulationState.clarificationId,initiatingRefinement:simulationState.initiatingRefinement}});
   }catch{}
 }
 function showSavedFindings() {
@@ -610,7 +610,7 @@ function workBanner(message,phase='Checking your land') {
 function startAutomaticStudy(result) {
   const version=result?.version?.assessment;
   if(restoredVisit||!findingsOpen||!version||!result.parcel||result.status==='needs-parcel'||result.locality?.boundaryUncertain||result.locality?.authorityUnresolved)return;
-  const question=studyQuestions.get(version);if(question){simulationState={question:question.question,brief:question.brief,refinement:question.refinement};displayFindings(result);return;}
+  const question=studyQuestions.get(version);if(question){simulationState={question:question.question,brief:question.brief,refinement:question.refinement,clarificationId:question.clarification?.id,initiatingRefinement:question.clarification?.initiatingRefinement};displayFindings(result);return;}
   if(scenarioResult?.assessmentVersion===version||automaticStudies.has(version))return;
   automaticStudies.add(version);if(automaticStudies.size>32)automaticStudies.delete(automaticStudies.values().next().value);
   void simulateFindings();
@@ -618,12 +618,13 @@ function startAutomaticStudy(result) {
 async function simulateFindings(refinement='') {
   if(!lastFindings?.result.version?.assessment)return;
   restoredVisit=null;
+  const clarificationId=simulationState.clarificationId;
   scenarioController?.abort();const controller=new AbortController();scenarioController=controller;
   const sequence=++scenarioSequence,assessmentVersion=lastFindings.result.version.assessment;studyQuestions.delete(assessmentVersion);
-  simulationState={busy:true,refinement,message:'Considering your priorities and testing a housing idea…'};workBanner(simulationState.message,'Exploring possibilities');displayFindings(lastFindings.result);
+  simulationState={busy:true,refinement,clarificationId,message:'Considering your priorities and testing a housing idea…'};workBanner(simulationState.message,'Exploring possibilities');displayFindings(lastFindings.result);
   const timer=setTimeout(()=>controller.abort(),200000);
   try{
-    const response=await fetch('/api/scenario',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/x-ndjson'},body:JSON.stringify({assessmentVersion,refinement}),signal:controller.signal});
+    const response=await fetch('/api/scenario',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/x-ndjson'},body:JSON.stringify({assessmentVersion,refinement,clarificationId}),signal:controller.signal});
     if(!response.ok){const e=await response.json();throw new Error(e.error||'The exploration could not start.');}
     const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',result;
     while(true){const {done,value}=await reader.read();buffer+=decoder.decode(value,{stream:!done});const lines=buffer.split('\n');buffer=lines.pop();
@@ -633,9 +634,9 @@ async function simulateFindings(refinement='') {
     }
     if(sequence!==scenarioSequence||!findingsOpen||lastFindings.result.version?.assessment!==assessmentVersion)return;
     if(!result)throw new Error('The exploration connection ended before a result arrived.');
-    if(result.status==='needs-input'){simulationState={question:result.question,brief:result.brief,refinement};studyQuestions.set(assessmentVersion,{...result,refinement});if(studyQuestions.size>32)studyQuestions.delete(studyQuestions.keys().next().value);}
+    if(result.status==='needs-input'){simulationState={question:result.question,brief:result.brief,refinement,clarificationId:result.clarification.id,initiatingRefinement:result.clarification.initiatingRefinement};studyQuestions.set(assessmentVersion,{...result,refinement});if(studyQuestions.size>32)studyQuestions.delete(studyQuestions.keys().next().value);}
     else{lastFindings.result=await mergeStudyEvidence(findingsInput(),lastFindings.result,result);scenarioResult=result;simulationState={};}
-  }catch(e){if(sequence===scenarioSequence){automaticStudies.delete(assessmentVersion);simulationState={...simulationState,refinement,error:e.name==='AbortError'?'This exploration was interrupted. Your findings and land selection are kept.':e.message};}}
+  }catch(e){if(sequence===scenarioSequence){automaticStudies.delete(assessmentVersion);simulationState={...simulationState,refinement,error:e.name==='AbortError'?'The connection to this study ended. The server may still be working; retry to reconnect. Your concern and findings are kept.':e.message};}}
   finally{clearTimeout(timer);if(sequence===scenarioSequence&&findingsOpen){simulationState.busy=false;workBanner('');displayFindings(lastFindings.result);}}
 }
 function displayFindings(result, progressive=false) {
@@ -681,7 +682,7 @@ async function showFindings(retry = false) {
   $('findings-step').setAttribute('aria-busy', 'true');
   const timer = setTimeout(() => controller.abort(), 200000);
   try {
-    const response = await fetch('/api/first-look', {method: 'POST', headers: {'Content-Type': 'application/json', Accept: 'application/x-ndjson'}, body: signature, signal: controller.signal});
+    const response = await fetch('/api/first-look', {method: 'POST', headers: {'Content-Type': 'application/json', Accept: 'application/x-ndjson'}, body: JSON.stringify({...input,executionIntent:retry?'fresh':'reuse'}), signal: controller.signal});
     if (!response.ok) {const failed = await response.json(); throw new Error(failed.error || 'The research agent is unavailable.');}
     const reader = response.body.getReader(), decoder = new TextDecoder();
     let buffer = '', result;

@@ -24,7 +24,7 @@ export function housingEvidenceBasis(support,sources,evidence={}){
   const cited=support.map(item=>({source:sources.find(s=>s.id===item.sourceId),quote:item.quote})).filter(x=>x.source&&!x.source.scopeConflict&&(x.source.scope!=='county'||countyAuthority)&&x.source.scope!=='state');
   const housing=/\b(?:residential|residences?|dwelling|housing)\b/i;
   const operative=/\b(?:allow(?:ed)?|permit(?:ted|s)?|require(?:d|s)?|shall|must|may be (?:built|constructed|developed))\b|●/i;
-  const eligible=cited.filter(({source})=>source.kind==='code-provision'&&!/\b(?:definitions?|purpose|intent|conversion|non.conforming)\b/i.test(source.title));
+  const eligible=cited.filter(({source})=>source.kind==='code-provision'&&source.truncated!==true&&!/\b(?:definitions?|purpose|intent|conversion|non.conforming)\b/i.test(source.title));
   if(evidence.planningSystem?.type==='no-zoning'){
     const established=(evidence.planningSystem.sources??[]).some(s=>sources.some(e=>e.id===s.id&&e.kind==='planning-guidance'&&!e.scopeConflict));
     if(!established)return null;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createScenarioAgent} from '../scripts/scenario-agent.mjs';
+import {createScenarioAgent} from './decision-fixtures.mjs';
 import {calculateConcept} from '../scripts/scenario-geometry.mjs';
 import {parcelStudy} from '../scripts/parcel-study.mjs';
 import {activateHousingOption,matchingSavedScenario} from '../findings-session.js';

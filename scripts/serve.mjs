@@ -1,3 +1,6 @@
+import {createRunLedger} from './run-ledger.mjs';
+import {createHash} from 'node:crypto';
+import {readdir} from 'node:fs/promises';
 import {validateScenarioInput} from './scenario-agent.mjs';
 import { createFindingsService, handleFindings } from './gloo.mjs';
 import { createServer } from 'node:http';
@@ -40,7 +43,8 @@ export async function createAppServer(directory = fileURLToPath(new URL('../', i
   // This is a browser API key. Only the two public Maps settings are exposed.
   const config = await readAppConfig(root, environment);
   const mapsConfig = JSON.stringify(config.maps);
-  const review = createFindingsService({...config.gloo, onDiagnostic: event => {if (['agent-completed','scenario-completed','scenario-request','scenario-round','scenario-upstream-error'].includes(event.type)) console.info(JSON.stringify(event)); else if (['invalid-assessment','scenario-tool-error'].includes(event.type)) console.warn('Gloo output check:', event.reason);}});
+  const scriptRoot=fileURLToPath(new URL('./',import.meta.url)),codeHasher=createHash('sha256');for(const file of (await readdir(scriptRoot)).filter(f=>f.endsWith('.mjs')).sort())codeHasher.update(await readFile(resolve(scriptRoot,file)));
+  const review = createFindingsService({...config.gloo,codeHash:codeHasher.digest('hex'),ledgerFactory:createRunLedger(resolve(root,'.runtime','decision-traces')), onDiagnostic: event => {if (['agent-completed','scenario-completed','scenario-request','scenario-round','scenario-upstream-error'].includes(event.type)) console.info(JSON.stringify(event)); else if (['invalid-assessment','scenario-tool-error'].includes(event.type)) console.warn('Gloo output check:', event.reason);}});
   return createServer(async (request, response) => {
     const fail = (status, message) => {
       response.writeHead(status, { 'Content-Type':'text/plain; charset=utf-8', 'X-Content-Type-Options':'nosniff' });

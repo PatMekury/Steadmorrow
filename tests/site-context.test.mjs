@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {parseContext,readSiteContext,readNearbySchools,mappedHeight,straightLineMeters} from '../scripts/site-context.mjs';
 import {createResearchSession} from '../scripts/agent-tools.mjs';
 import {calculateConcept} from '../scripts/scenario-geometry.mjs';
-import {createScenarioAgent} from '../scripts/scenario-agent.mjs';
+import {createScenarioAgent} from './decision-fixtures.mjs';
 import {multiArea,overlapArea} from '../scripts/site-geometry.mjs';
 import {digest} from '../scripts/evidence-client.mjs';
 import {heightRecord} from '../scripts/overture-heights.mjs';

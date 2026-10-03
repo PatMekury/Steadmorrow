@@ -11,6 +11,10 @@ export function studyView(value){
       if(!Object.hasOwn(value,key+'Count'))result[key+'Count']=item.length;
       continue;
     }
+    if(key==='text'&&value.id&&typeof item==='string'&&item.length>6000){
+      result.text=item.slice(0,6000);result.observationRange={start:0,end:6000,totalCharacters:item.length,omittedCharacters:item.length-6000,continuation:{tool:'read_source_passages',source_id:value.id,start_passage:1}};continue;
+    }
+    if(key==='passages'&&Array.isArray(item)&&item.length>8){result.passages=item.slice(0,8);result.omittedPassageCount=item.length-8;result.continuation={tool:'read_source_passages',source_id:value.id,start_passage:9};continue;}
     result[key]=studyView(item);
   }
   return result;
