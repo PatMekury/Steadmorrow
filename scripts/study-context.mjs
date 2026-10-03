@@ -25,6 +25,67 @@ export function studyView(value){
   return result;
 }
 
+// A single current state, not a second copy of every current test in its archive.
+// This projection never changes saved receipts or the evidence used by validators.
+export function studyMessageView(value){
+  const view=studyView(value),state=view.studyState;
+  if(!state?.brief){
+    return {...view,propertyEvidence:{concernBrief:view.propertyEvidence?.concernBrief??[]},
+      measuredSiteShape:undefined,eligibleHousingPassages:undefined,priorTestHistory:[],previousScenario:undefined};
+  }
+  const active=new Set((state.concepts??[]).map(c=>c.id));
+  for(const concept of state.concepts??[]){
+    // The accepted option holds this exact brief once, including all citations.
+    if(state.options?.some(o=>o.id===concept.optionId)){
+      delete concept.designBrief;concept.designBriefOptionId=concept.optionId;
+    }
+  }
+  view.priorTestHistory=(view.priorTestHistory??[]).filter(t=>!active.has(t.concept?.id)).map(t=>{
+    const c=t.concept;
+    if(!c)return t;
+    return {archived:true,concept:{id:c.id,optionId:c.optionId,planVersion:c.planVersion,evidenceVersion:c.evidenceVersion,
+      status:c.status,typology:c.typology,parameters:c.parameters,metrics:c.metrics,diagnostics:c.diagnostics,
+      assumptions:c.assumptions,limitations:c.limitations,designCheck:c.designCheck},review:t.review,
+      note:'Historical test only; the current option design brief governs all new tests.'};
+  });
+  if(view.previousScenario)delete view.previousScenario.previousTests;
+  // Quote text lives in the original source passages. Exact matching only; an
+  // unmatched excerpt remains verbatim, so exceptions cannot be silently lost.
+  const sources=view.propertyEvidence?.sources??[];
+  const references=item=>{
+    if(Array.isArray(item))return item.map(references);
+    if(!item||typeof item!=='object')return item;
+    const passage=item.sourceId&&typeof item.quote==='string'
+      ?sources.find(s=>s.id===item.sourceId)?.passages?.find(p=>p.text===item.quote):null;
+    const result={};
+    for(const [key,part]of Object.entries(item))if(!(passage&&key==='quote'))result[key]=references(part);
+    if(passage)result.passageId=passage.id;
+    return result;
+  };
+  view.studyState=references(state);
+  view.completedAssessment=references(view.completedAssessment);
+  view.priorTestHistory=references(view.priorTestHistory);
+  return view;
+}
+
+export function studyExchangeView(tool,output){
+  if(output?.status==='tool-error')return output;
+  if(['plan_housing_options','revise_housing_plan'].includes(tool))return {
+    status:output.status,planVersion:output.planVersion,review:output.review,
+    storedIn:'studyState.options: the accepted options and full design briefs are in the current state.'};
+  if(tool==='review_layout')return {id:output.id,status:output.status,metrics:output.metrics,review:output.review,
+    storedIn:'studyState.concepts and studyState.reviews'};
+  return studyView(output);
+}
+
+export function studyFailure(error){
+  if(Number.isInteger(error.status))return error;
+  const timedOut=error.name==='TimeoutError'||error.name==='AbortError';
+  if(!timedOut)return error;
+  return Object.assign(new Error('The housing study ran out of time before its final check. Your property findings and concerns are saved. Retry the housing study.'),
+    {status:504,cause:error,diagnostic:{code:'STUDY_TIMEOUT'}});
+}
+
 export async function studyUpstreamError(response,{round,onDiagnostic}){
   // Retain only typed diagnostics, never request headers or arbitrary error text.
   let data;try{

@@ -1,7 +1,40 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {studyView,studyUpstreamError} from '../scripts/study-context.mjs';
+import {studyView,studyMessageView,studyExchangeView,studyFailure,studyUpstreamError} from '../scripts/study-context.mjs';
 import {createScenarioAgent} from '../scripts/scenario-agent.mjs';
+
+test('six tests and a revision do not duplicate active concepts, briefs or exact citation text',()=>{
+ const quote='Residential development requires review, subject to the stated exceptions. '.repeat(45);
+ const designBrief={household:'Family homes',minimumAllocatedAreaPerHomeSquareMeters:85,support:[{sourceId:'rule',quote}]};
+ const concepts=Array.from({length:6},(_,i)=>({id:'concept-'+i,optionId:'option-1',status:i===3?'illustrative':'no-fit',parameters:{width:6+i,depth:10},metrics:{homes:i===3?2:0},designBrief,limitations:'This bounded search does not establish capacity.'}));
+ const original={originalTexts:['Housing','Effects'],propertyEvidence:{sources:[{id:'rule',passages:[{id:'rule-p1',text:quote}]}]},
+   studyState:{brief:[{id:'goal'}],options:[{id:'option-1',designBrief}],concepts:concepts.slice(3),reviews:[]},
+   priorTestHistory:concepts.map(concept=>({concept})),previousScenario:{previousTests:concepts}};
+ const before=structuredClone(original),view=studyMessageView(original);
+ assert.deepEqual(original,before);assert.equal(view.priorTestHistory.length,3);
+ assert.deepEqual(view.studyState.concepts.map(c=>c.id),concepts.slice(3).map(c=>c.id));
+ assert.equal(view.studyState.options[0].designBrief.support[0].passageId,'rule-p1');
+ assert.equal(view.propertyEvidence.sources[0].passages[0].text,quote);
+ assert.equal(view.studyState.concepts[0].designBrief,undefined);
+ assert.equal(view.studyState.concepts[0].designBriefOptionId,'option-1');
+ assert.equal(view.priorTestHistory[0].concept.limitations,concepts[0].limitations);
+ assert.ok(JSON.stringify(view).length<JSON.stringify(studyView(original)).length/3);
+ const partial={...original,completedAssessment:{support:[{sourceId:'rule',quote:'An unmatched exact exception.'}]}};
+ assert.equal(studyMessageView(partial).completedAssessment.support[0].quote,'An unmatched exact exception.');
+ assert.equal(studyExchangeView('plan_housing_options',{status:'planned',options:original.studyState.options}).options,undefined);
+});
+
+test('study interpretation receives concerns without property or archived layout baggage',()=>{
+ const view=studyMessageView({originalTexts:['Housing','Effects'],propertyEvidence:{concernBrief:[{originalExcerpt:'Effects'}],sources:[{text:'Records'}],selectedArea:{geometry:[1,2]}},studyState:{brief:null},priorTestHistory:[{concept:{id:'old'}}]});
+ assert.deepEqual(view.propertyEvidence,{concernBrief:[{originalExcerpt:'Effects'}]});assert.deepEqual(view.originalTexts,['Housing','Effects']);assert.equal(view.priorTestHistory.length,0);
+});
+
+test('a study timeout produces an actionable study error while keeping existing typed failures',async()=>{
+ const entry={input:{priorities:{purpose:'Housing',matters:'',choices:[]}},session:{snapshot:()=>({sources:[]}),context:()=>({sources:[]}),toolDefinitions:()=>[]}};
+ const run=createScenarioAgent({resolveContext:()=>entry,reserve:()=>()=>{},fetchImpl:async()=>{throw new DOMException('Private provider details','TimeoutError');}});
+ await assert.rejects(run({assessmentVersion:'a'.repeat(20)}),e=>e.status===504&&/housing study ran out of time/.test(e.message)&&!e.message.includes('Private'));
+ const typed=Object.assign(new Error('Preserve specific issue'),{status:409});assert.equal(studyFailure(typed),typed);
+});
 
 test('model projection preserves receipt facts and source qualifications without mutating scene geometry',()=>{
  const original={originalExcerpt:'nearest police station',answer:{id:'route-1',distanceMeters:836,distanceType:'street-route',sourceUrl:'https://example.gov/source',coverage:'Three candidates, not complete nearest coverage',route:{mode:'walking',geometry:[[1,2],[3,4]],streets:[{geometry:Array(10000).fill([1,2])}]}},sources:[{id:'s1',passages:[{id:'p1',text:'New construction requires review except specified exemptions.'}]}]};

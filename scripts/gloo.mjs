@@ -350,6 +350,8 @@ export function createFindingsService({apiKey,model='gloo-openai-gpt-5-mini',fet
 }
 
 export async function handleFindings(request,response,review,validator=validateInput){
+  const studyRequest=request.url?.split(/[?#]/,1)[0]==='/api/scenario';
+  const interrupted=studyRequest?'The housing study was interrupted. Your property findings and concerns are saved. Retry the housing study.':'The property research could not complete this run. Your selected land and concerns are saved.';
   const send=(status,data)=>{response.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});response.end(JSON.stringify(data));};
   try{
     if(request.method!=='POST')throw new FindingsError(405,'Method not allowed');
@@ -363,8 +365,8 @@ export async function handleFindings(request,response,review,validator=validateI
       response.writeHead(200,{'Content-Type':'application/x-ndjson; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
       const write=event=>{if(!response.destroyed)response.write(JSON.stringify(event)+'\n');};
       try{const result=await review(data,{onProgress:progress=>write({type:'progress',...progress})});write({type:'result',result});}
-      catch(error){write({type:'error',error:Number.isInteger(error.status)?error.message:'The research agent could not complete this run. Your previous concept is retained.'});}
+      catch(error){write({type:'error',error:Number.isInteger(error.status)?error.message:interrupted});}
       response.end();
     }else send(200,await review(data));
-  }catch(error){send(Number.isInteger(error.status)?error.status:500,{error:Number.isInteger(error.status)?error.message:'Unable to retrieve this property’s findings.'});}
+  }catch(error){send(Number.isInteger(error.status)?error.status:500,{error:Number.isInteger(error.status)?error.message:interrupted});}
 }

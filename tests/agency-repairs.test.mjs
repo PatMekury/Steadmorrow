@@ -105,7 +105,7 @@ test('replanning uses observed failures, fresh source review and one cumulative 
 });
 test('later refinements can see failed and intermediate versions, including attempts from interrupted runs',async()=>{
  const entry=makeEntry();const old=calculateConcept(entry.e,params);entry.studyHistory=[{concept:{...old,id:'earlier',status:'no-fit',buildings:[]},reviewed:false}];
- const m=scripted(entry,[s=>{assert.equal(s.priorTestHistory[0].concept.id,'earlier');return ['interpret_priorities',{items:[purpose,{...purpose,original_excerpt:'Keep outdoor space',label:'Outdoor'}]}];},['test_layout',params],s=>['review_layout',judgment(s)],s=>['select_layout',select(s)]]);
+ const m=scripted(entry,[['interpret_priorities',{items:[purpose,{...purpose,original_excerpt:'Keep outdoor space',label:'Outdoor'}]}],s=>{assert.equal(s.priorTestHistory[0].concept.id,'earlier');return ['test_layout',params];},s=>['review_layout',judgment(s)],s=>['select_layout',select(s)]]);
  const result=await m.run({assessmentVersion:ref,refinement:'Keep outdoor space'});assert.equal(result.testHistory.length,2);assert.equal(result.testHistory[0].concept.id,'earlier');
 });
 test('late sources stay discoverable and incomplete text cannot establish a positive housing route',()=>{
