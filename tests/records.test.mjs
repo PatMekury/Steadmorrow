@@ -9,6 +9,23 @@ import {locate,suitableItem,discoverLayers,readSpatial,housingContext,municipalC
 const square=(x,y,w=.001)=>[[x,y],[x+w,y],[x+w,y+w],[x,y+w],[x,y]];
 const envelope=data=>({data,url:'https://example.gov/record',retrievedAt:'2026-09-21T00:00:00Z',hash:'fixture'});
 
+test('metadata geometry expressions cannot break a parcel query; genuine area fields and returned boundaries remain',async()=>{
+ const fields=['PARCEL_ID','TOTAL_LAND_AREA','SHAPE_Area','SHAPE.STArea()','Shape.STLength()'];
+ const layer={url:'https://example.gov/MapServer/0',item:{id:'fixture',title:'Parcels'},publisher:'Example authority',fields,meta:{fields:fields.map(name=>({name}))}};
+ const result=await readSpatial(async target=>{
+  const query=new URL(target).searchParams;assert.equal(query.get('outFields'),'PARCEL_ID,TOTAL_LAND_AREA');assert.equal(query.get('returnGeometry'),'true');
+  return envelope({features:[{attributes:{PARCEL_ID:'A',TOTAL_LAND_AREA:100},geometry:{rings:[square(-95,29)]}}]});
+ },[layer],fromRings([square(-95,29)]),'parcel');
+ assert.equal(result.records[0].id,'A');assert.equal(result.records[0].attributes.TOTAL_LAND_AREA,'100');assert.ok(result.records[0].geometry.length);assert.ok(result.records[0].mappedSquareMeters>0);
+});
+
+test('an HTTP-success ArcGIS query rejection is not mislabeled as a timeout or a successful empty search',async()=>{
+ const read=createEvidenceClient({fetchImpl:async()=>Response.json({error:{code:400,message:'private upstream diagnostic'}})});
+ const layer={url:'https://example.gov/MapServer/0',item:{id:'fixture'},fields:['PARCEL_ID'],meta:{fields:[{name:'PARCEL_ID'}]}};
+ const diagnostics={};assert.equal(await readSpatial(read,[layer],fromRings([square(-95,29)]),'parcel',diagnostics),null);
+ assert.equal(diagnostics.completedQueries,0);assert.equal(diagnostics.failedQueries,1);assert.deepEqual(diagnostics.failures,['Source query rejected (code 400)']);
+});
+
 test('parcel requests omit private aliases and discard unsolicited personal attributes before creating evidence',async()=>{
  const layer={url:'https://example.gov/FeatureServer/0',item:{id:'privacy-fixture',title:'Example parcels'},publisher:'Example authority',fields:['PARCEL_ID','PROP_DATA'],meta:{fields:[{name:'PARCEL_ID'},{name:'PROP_DATA',alias:'Owner Name'}]}};
  const found=await readSpatial(async target=>{

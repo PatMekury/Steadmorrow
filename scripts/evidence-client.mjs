@@ -37,7 +37,7 @@ export function createEvidenceClient({ fetchImpl = fetch, now = Date.now, timeou
       }
       const buffer = Buffer.concat(chunks);
       const data = format === 'json' ? JSON.parse(buffer.toString('utf8')) : format === 'bytes' ? buffer : buffer.toString('utf8');
-      if (format === 'json' && data.error) throw new Error('Source query failed');
+      if (format === 'json' && data.error) throw new Error('Source query rejected'+(Number.isInteger(data.error.code)?` (code ${data.error.code})`:''));
       const value = { data, retrievedAt: new Date(now()).toISOString(), hash: digest(buffer), url:requestUrl };
       if(cache.has(key)){cacheBytes-=cache.get(key).size;cache.delete(key);}
       cache.set(key, {time: now(), value,size:buffer.length});cacheBytes+=buffer.length;

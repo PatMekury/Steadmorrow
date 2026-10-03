@@ -140,6 +140,10 @@ export async function discoverLayers(read, locality, points, kind, searchHint=''
   return layers;
 }
 
+// Shape expressions exposed in ArcGIS metadata are not ordinary outFields on
+// every service. Request geometry through returnGeometry and measure it locally.
+// Keep genuine property attributes (lot area, acreage, use and identifiers).
+const geometryAttribute=field=>field?.type==='esriFieldTypeGeometry'||/^(?:shape|geom(?:etry)?)(?:[._]|$)|[()]/i.test(field?.name??field??'');
 function findField(meta, patterns) {
   for(const pattern of patterns) {const f=meta.fields.find(f=>!isPrivateRecordField(f)&&(pattern.test(f.name)||pattern.test(f.alias??''))); if(f)return f;}
   return null;
@@ -155,7 +159,7 @@ export async function readSpatial(read,layers,geometry,kind,diagnostics={}) {
   for (const layer of layers) {
     try {
       const chosen=layer.identifierField?layer.meta.fields.find(f=>f.name===layer.identifierField):null;
-      const requestFields=[...new Set([...layer.fields,...(chosen?[chosen.name]:[])])].filter(name=>!isPrivateRecordField(layer.meta.fields.find(f=>f.name===name)??name));
+      const requestFields=[...new Set([...layer.fields,...(chosen?[chosen.name]:[])])].filter(name=>{const field=layer.meta.fields.find(f=>f.name===name)??name;return !isPrivateRecordField(field)&&!geometryAttribute(field);});
       const response=await queryFeatures(read,layer.url,ringsOf(geometry),requestFields.join(','));
       diagnostics.completedQueries++;
       const idField=chosen??findField(layer.meta,kind==='parcel'?parcelIdPatterns:zoneIdPatterns);
@@ -183,7 +187,7 @@ export async function readSpatial(read,layers,geometry,kind,diagnostics={}) {
         kind:'mapped-record',
       });
       return {records,evidence};
-    } catch(error) { diagnostics.failedQueries++;(diagnostics.failures??=[]).push(/Source returned \d+|Incomplete spatial|Unsupported source|Invalid source/.test(error.message)?error.message:'Source timed out or could not be read'); }
+    } catch(error) { diagnostics.failedQueries++;(diagnostics.failures??=[]).push(/Source returned \d+|Source query rejected|Incomplete spatial|Unsupported source|Invalid source/.test(error.message)?error.message:'Source timed out or could not be read'); }
   }
   return null;
 }
