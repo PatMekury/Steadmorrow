@@ -8,6 +8,36 @@ const safeInput=input=>input&&validatePolygon(input.points??[]).valid&&!privateI
 const validResult=result=>result?.schemaVersion===2&&Array.isArray(result.sources)&&result.selectedArea?.geometry?.length;
 const inputWithoutParcel=input=>JSON.stringify({...input,parcelKey:null});
 
+// Losslessly share repeated large receipts/context within the stored document.
+// Explicit paths avoid reserving a marker inside user or source objects.
+function encodeSession(value){
+  const payload=JSON.parse(JSON.stringify(value)),seen=new Map(),references=[];
+  const visit=(node,path,parent,key)=>{
+    if(!node||typeof node!=='object')return;
+    const text=JSON.stringify(node);
+    if(path.length&&text.length>=2048){
+      if(seen.has(text)){references.push([path,seen.get(text)]);parent[key]=null;return;}
+      seen.set(text,path);
+    }
+    for(const [child,item]of Object.entries(node))visit(item,[...path,child],node,child);
+  };
+  visit(payload,[],null,null);return JSON.stringify({version:2,payload,references});
+}
+function decodeSession(saved){
+  if(saved?.version!==2)return saved;
+  if(!saved.payload||!Array.isArray(saved.references)||saved.references.length>2048)throw new Error('Invalid saved references');
+  const read=path=>{if(!Array.isArray(path)||!path.length||path.length>64||path.some(p=>typeof p!=='string'||['__proto__','prototype','constructor'].includes(p)))throw new Error('Invalid saved path');let value=saved.payload;for(const key of path){if(!value||typeof value!=='object'||!Object.hasOwn(value,key))throw new Error('Missing saved path');value=value[key];}return value;};
+  let expanded=JSON.stringify(saved.payload).length;
+  for(const pair of saved.references){
+    if(!Array.isArray(pair)||pair.length!==2)throw new Error('Invalid saved reference');
+    const [target,source]=pair,value=read(source);
+    if(read(target)!==null||!value||typeof value!=='object'||source.every((key,i)=>target[i]===key))throw new Error('Invalid shared receipt');
+    expanded+=JSON.stringify(value).length;if(expanded>16000000)throw new Error('Expanded findings too large');
+    const parent=target.length===1?saved.payload:read(target.slice(0,-1));parent[target.at(-1)]=structuredClone(value);
+  }
+  return saved.payload;
+}
+
 // A study may add sources after the assessment. Recompute the server's evidence
 // identity before advancing the saved snapshot; stale or unrelated studies fail closed.
 export async function mergeStudyEvidence(input,result,scenario){
@@ -55,7 +85,7 @@ export function saveFindingsSession(storage,{input,lastFindings,scenario=null,si
     // source/context data retained; exceeding the bound never truncates facts.
     const result={...lastFindings.result};delete result.scenario;
     const savedAt=Number.isFinite(lastFindings.time)&&lastFindings.time>0?lastFindings.time:now;
-    const payload=JSON.stringify({version:1,savedAt,input,lastFindings:{signature,result,time:lastFindings.time},scenario:matched,simulationState:state});
+    const payload=encodeSession({version:1,savedAt,input,lastFindings:{signature,result,time:lastFindings.time},scenario:matched,simulationState:state});
     if(payload.length>maxFindingsSessionCharacters){storage.removeItem(findingsSessionKey);return false;}
     storage.setItem(findingsSessionKey,payload);return true;
   }catch{return false;}
@@ -65,7 +95,7 @@ export function readFindingsSession(storage,input,{restoreParcel=false}={}){
   try{
     const raw=storage.getItem(findingsSessionKey);
     if(!raw||raw.length>maxFindingsSessionCharacters||!safeInput(input))return null;
-    const saved=JSON.parse(raw);
+    const saved=decodeSession(JSON.parse(raw));
     if(saved?.version!==1||!Number.isFinite(saved.savedAt)||!safeInput(saved.input)||!validResult(saved.lastFindings?.result))return null;
     if(saved.lastFindings.signature!==JSON.stringify(saved.input))return null;
     const exact=JSON.stringify(input)===saved.lastFindings.signature;
@@ -95,7 +125,7 @@ export function activateHousingOption(scenario,id){
   const option=selectableHousingOptions(scenario).find(o=>o.id===id);if(!option)return scenario;const originalBrief=scenario.originalBrief??scenario.brief??[];
   return {...scenario,activeOptionId:id,concept:option.concept??null,status:option.concept?.status??'needs-evidence',
     activeConceptId:option.concept?.id,rationale:option.rationale??'Selection rationale was not recorded in this saved study.',support:option.selectionSupport??option.support,contextVersion:scenario.siteContext?.geometryVersion??null,
-    originalBrief,brief:originalBrief.map(p=>p.answer?.receipts?.some(r=>r.conceptId&&r.conceptId!==option.concept?.id)?{...p,answer:{...p.answer,status:'partial',headline:'Checked for another arrangement',applicability:'This receipt describes a different tested arrangement. The selected alternative needs its own effects check.'}}:p)};
+    originalBrief,brief:originalBrief.map(p=>p.answer?.receipts?.some(r=>r.conceptId)&&!p.answer.receipts.some(r=>r.conceptId===option.concept?.id)?{...p,answer:{...p.answer,status:'partial',headline:'Checked for another arrangement',applicability:'This receipt describes a different tested arrangement. The selected alternative needs its own effects check.'}}:p)};
 }
 
 export function selectableHousingOptions(scenario){

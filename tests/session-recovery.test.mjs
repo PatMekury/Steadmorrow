@@ -22,3 +22,12 @@ test('research recovery rejects edited source text and retains original source p
  const restored=createResearchSession(input,{initialEvidence:original});assert.equal(restored.snapshot().sources[0].text,source.text);
  original.sources[0].text='Changed source claim';assert.throws(()=>createResearchSession(input,{initialEvidence:original}),/source text/);
 });
+
+
+test('display-only server restore reads retained results beyond cache TTL and never starts research on a miss',async()=>{
+ const evidence=createResearchSession(input).snapshot(),result={...evidence,narrativeStatus:'partial'};result.version={evidence:result.caseId,assessment:digest([result.caseId,input.priorities,null,null,null,null,null]).slice(0,20)};
+ let calls=0,time=1000000;const review=createFindingsService({now:()=>time,apiKey:'fixture',fetchImpl:async()=>{calls++;throw Error('Unexpected research');}});assert.equal(review.restore([{input,evidence,result,at:1000,completedTools:[]}]),1);
+ const restored=await review({...input,executionIntent:'restore'});assert.equal(restored.execution.action,'restored');assert.equal(restored.savedAt,1000);assert.equal(restored.version.assessment,result.version.assessment);
+ await assert.rejects(review({...input,priorities:{...input.priorities,purpose:'A different goal'},executionIntent:'restore'}),e=>e.status===404);
+ time=3601001;await assert.rejects(review({...input,executionIntent:'restore'}),e=>e.status===404);assert.equal(calls,0);
+});

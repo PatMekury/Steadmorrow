@@ -2,7 +2,7 @@ import {activateHousingOption} from './findings-session.js';
 import { privateInputFields, hasPrivateInput, screenedLandSave, privacyMessage, addressPrivacyMessage } from './input-privacy.js';
 import { validatePolygon, areaSquareMeters, polygonCenter } from './geometry.js';
 import { renderFindings } from './findings.js';
-import {saveFindingsSession,readFindingsSession,savedFindingsMessage,mergeStudyEvidence} from './findings-session.js';
+import {saveFindingsSession,readFindingsSession,savedFindingsMessage,mergeStudyEvidence,matchingSavedScenario} from './findings-session.js';
 
 const $ = id => document.getElementById(id);
 const storageKey = 'steadmorrow.land.v1';
@@ -580,9 +580,21 @@ function restoreFindingsVisit() {
     if(simulationState.question&&lastFindings.result.version?.assessment)studyQuestions.set(lastFindings.result.version.assessment,{question:simulationState.question,brief:simulationState.brief,refinement:simulationState.refinement,clarification:{id:simulationState.clarificationId,initiatingRefinement:simulationState.initiatingRefinement}});
   }catch{}
 }
-function showSavedFindings() {
-  // Page restoration is display-only. It never calls the research or scenario
-  // endpoints; only an explicit findings/retry/refinement action can do that.
+async function showSavedFindings() {
+  const restorationSequence=findingsSequence;
+  // The restore action only reads local retained state. A miss cannot start research.
+  if(!lastFindings){
+    const input=findingsInput(),signature=JSON.stringify(input),sequence=findingsSequence;
+    try{
+      const response=await fetch('/api/first-look',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...input,executionIntent:'restore'}),signal:AbortSignal.timeout(10000)});
+      if(response.ok){let result=await response.json();if(sequence!==findingsSequence||!findingsOpen||JSON.stringify(findingsInput())!==signature)return;
+        if(result.schemaVersion!==2||!Array.isArray(result.sources))throw new Error('Invalid restored findings');
+        const restoredScenario=result.scenario;if(restoredScenario)result=await mergeStudyEvidence(input,result,restoredScenario);
+        lastFindings={signature,result,time:result.savedAt};scenarioResult=matchingSavedScenario(result,restoredScenario);simulationState={};restoredVisit={savedAt:result.savedAt,lastFindings,scenario:scenarioResult,simulationState};
+      }
+    }catch{}
+  }
+  if(restorationSequence!==findingsSequence||!findingsOpen)return;
   $('findings-step').setAttribute('aria-busy','false');
   $('findings-progress').hidden=true;$('findings-error').hidden=true;
   if(lastFindings?.signature===JSON.stringify(findingsInput())){

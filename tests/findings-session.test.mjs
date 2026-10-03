@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {findingsSessionKey,maxFindingsSessionCharacters,saveFindingsSession,readFindingsSession,savedFindingsMessage} from '../findings-session.js';
+import {findingsSessionKey,maxFindingsSessionCharacters,saveFindingsSession,readFindingsSession,savedFindingsMessage,activateHousingOption} from '../findings-session.js';
 
 const storage=()=>{const values=new Map();return {getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)};};
 const input=()=>({points:[{lat:30,lng:-95},{lat:30,lng:-94.999},{lat:30.001,lng:-94.999},{lat:30.001,lng:-95}],query:'Example church',parcelKey:null,priorities:{purpose:'Affordable housing',matters:'How close is a school?',choices:[],exploring:false}});
@@ -58,8 +58,24 @@ test('page boot follows display-only restoration and retains explicit findings/r
   const source=await readFile(new URL('../land.js',import.meta.url),'utf8');
   assert.match(source,/if\(findingsOpen\)showSavedFindings\(\);/);assert.doesNotMatch(source,/if\(findingsOpen\)void showFindings\(\)/);
   const restore=source.slice(source.indexOf('function showSavedFindings()'),source.indexOf("window.addEventListener('pagehide'"));
-  assert.doesNotMatch(restore,/fetch\(|startAutomaticStudy\(|simulateFindings\(/);assert.match(restore,/savedFindingsMessage/);
+  assert.doesNotMatch(restore,/startAutomaticStudy\(|simulateFindings\(/);assert.match(restore,/executionIntent:'restore'/);assert.match(restore,/savedFindingsMessage/);
   assert.match(source,/\$\('see-findings'\)\.addEventListener\('click', \(\) => \{ void showFindings\(\); \}\)/);
   assert.match(source,/\$\('refresh-findings'\)\.addEventListener\('click', \(\) => \{ void showFindings\(true\); \}\)/);
   assert.match(source,/window\.addEventListener\('pagehide',saveFindingsVisit\)/);
+});
+
+
+test('dense duplicate receipts survive the storage bound without losing source or measurement data',()=>{
+ const s=storage(),e=entry(),receipt={id:'effects',kind:'surroundings-effects',structures:Array.from({length:1500},(_,i)=>({id:'structure-'+i,detail:'Original mapped qualification. '.repeat(10)}))};
+ e.lastFindings.result.priorityMeasurements=[receipt];e.scenario.priorityMeasurements=e.lastFindings.result.priorityMeasurements;e.scenario.effects=[receipt];e.scenario.brief=[{answer:{receipts:[receipt]}}];e.scenario.originalBrief=structuredClone(e.scenario.brief);e.scenario.siteContext=e.lastFindings.result.siteContext;e.scenario.sources=e.lastFindings.result.sources;
+ assert(JSON.stringify(e).length>maxFindingsSessionCharacters);assert.equal(saveFindingsSession(s,e),true);assert(s.getItem(findingsSessionKey).length<maxFindingsSessionCharacters);
+ const restored=readFindingsSession(s,e.input);assert.deepEqual(restored.scenario,e.scenario);assert.deepEqual(restored.lastFindings,e.lastFindings);
+ const malformed=JSON.parse(s.getItem(findingsSessionKey));malformed.references.push([['__proto__'],['scenario']]);s.setItem(findingsSessionKey,JSON.stringify(malformed));assert.equal(readFindingsSession(s,e.input),null);
+});
+
+test('comparison answers with a matching receipt remain applicable when switching alternatives',()=>{
+ const first={id:'first',useStatus:'conditional',concept:{id:'a',status:'illustrative',buildings:[{}]}},second={id:'second',useStatus:'conditional',concept:{id:'b',status:'illustrative',buildings:[{}]}};
+ const answer={status:'partial',headline:'Partial answer',receipts:[{conceptId:'a'},{conceptId:'b'}]};
+ const changed=activateHousingOption({options:[first,second],brief:[{answer}]},'second');assert.equal(changed.brief[0].answer.headline,'Partial answer');
+ const unmatched=activateHousingOption({options:[first,second],brief:[{answer:{...answer,receipts:[{conceptId:'a'}]}}]},'second');assert.equal(unmatched.brief[0].answer.headline,'Checked for another arrangement');
 });
