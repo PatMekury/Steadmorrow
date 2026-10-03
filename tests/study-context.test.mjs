@@ -1,7 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {studyView,studyMessageView,studyExchangeView,studyFailure,studyUpstreamError} from '../scripts/study-context.mjs';
+import {studyView,studyMessageView,studyExchangeView,studyCompletionChecks,studyFailure,studyUpstreamError} from '../scripts/study-context.mjs';
 import {createScenarioAgent} from '../scripts/scenario-agent.mjs';
+
+test('completion asks for a selected version per option, not new reviews and effects for every abandoned attempt',()=>{
+ const options=[{id:'one',useStatus:'conditional'},{id:'two',useStatus:'conditional'}];
+ const concepts=[{id:'old-empty',optionId:'one',buildings:[]},{id:'old-placed',optionId:'one',buildings:[{}]},{id:'chosen',optionId:'one',buildings:[{}]},{id:'empty-two',optionId:'two',buildings:[]}];
+ const reviews=new Map([['chosen',{verdict:'ready-to-compare',priorityStateVersion:'current'}],['empty-two',{verdict:'unresolved',priorityStateVersion:'current'}]]);
+ const checks=()=>studyCompletionChecks({options,concepts,reviews,priorityStateVersion:'current',hasSelectedEffects:c=>c.id==='chosen'});
+ assert.deepEqual(checks().optionsNeedingTests,[]);assert.deepEqual(checks().optionsNeedingCurrentCritique,[]);assert.deepEqual(checks().optionsNeedingEffects,[]);
+ assert.deepEqual(checks().selectionChoices.map(c=>c.conceptId),['chosen','empty-two']);
+ reviews.get('chosen').priorityStateVersion='old-answer';assert.deepEqual(checks().optionsNeedingCurrentCritique[0].candidateConceptIds,['old-placed','chosen']);
+});
 
 test('six tests and a revision do not duplicate active concepts, briefs or exact citation text',()=>{
  const quote='Residential development requires review, subject to the stated exceptions. '.repeat(45);
@@ -55,7 +65,7 @@ test('unchanged reviews cannot grow the conversation; evidence changes reopen re
  const entry={session,input:{priorities:{purpose:'affordable housing',matters:'nearest police station',choices:[]}},result:{housingRoute:'supported',assessment:{summary:'A qualified development path.'},housingAnalysis:{siteLimits:'Recorded restrictions remain unverified.'}}};
  const run=createScenarioAgent({optionCount:1,apiKey:'fixture',model:'fixture',resolveContext:()=>entry,reserve:()=>()=>{},fetchImpl:async(_url,options)=>{
   const payload=JSON.parse(options.body),state=JSON.parse(payload.input[0].content);
-  assert.equal(state.completedAssessment.housingAnalysis.siteLimits,'Recorded restrictions remain unverified.');
+  if(requests)assert.equal(state.completedAssessment.housingAnalysis.siteLimits,'Recorded restrictions remain unverified.');
   assert.equal(state.originalTexts[0],'affordable housing');
   assert.ok(JSON.stringify(payload.input).length<14000,'No cumulative geometry or source copies');
   assert.ok(payload.input.filter(i=>i.type==='function_call').length<=2,'Only complete recent exchanges retained');

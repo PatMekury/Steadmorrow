@@ -167,7 +167,7 @@ test('selection rejects omitted option versions, mismatched reviews and inflated
  const a={id:'a',optionId:'option-1',planVersion:'v',buildings:[{}]},b={id:'b',optionId:'option-2',planVersion:'v',buildings:[{}]},reviews=new Map([['a',{id:'ra',verdict:'ready-to-compare'}],['b',{id:'rb',verdict:'ready-to-compare'}]]),context={options:[{id:'option-1'},{id:'option-2'}],concepts:new Map([['a',a],['b',b]]),reviews,planVersion:'v'};
  const args={concept_id:'a',selections:[{option_id:'option-1',concept_id:'a',review_id:'ra',rationale:'Room remains around buildings.'}],unresolved_option_ids:[]};
  assert.throws(()=>explicitSelections(args,context),/Every planned option/);
- assert.throws(()=>explicitSelections({...args,selections:[{...args.selections[0],review_id:'rb'}]},context),/exact current/);
+ assert.throws(()=>explicitSelections({...args,selections:[{...args.selections[0],review_id:'rb'}]},context),/current review_id is ra/);
  assert.throws(()=>explicitSelections({...args,selections:[{...args.selections[0],rationale:'This is approved housing.'}]},context),/legal/);
 });
 

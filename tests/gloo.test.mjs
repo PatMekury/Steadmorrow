@@ -5,6 +5,17 @@ import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,dirname,basename,resolve} from 'node:path';
 import {createFindingsService,handleFindings,validateInput,parseReview} from '../scripts/gloo.mjs';
+
+test('streaming and JSON failures identify the housing study without blaming completed research',async()=>{
+ const server=createServer((req,res)=>handleFindings(req,res,async()=>{throw Error('private diagnostic');},()=>{}));
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const url=`http://127.0.0.1:${server.address().port}`;
+ try{
+  for(const accept of ['application/x-ndjson','application/json']){
+   const response=await fetch(url+'/api/scenario',{method:'POST',headers:{'Content-Type':'application/json',Accept:accept,Origin:url},body:'{}'});
+   const body=JSON.parse(await response.text());assert.match(body.error,/housing study/i);assert.match(body.error,/findings and concerns are saved/);assert.doesNotMatch(body.error,/research agent|private diagnostic|previous concept/);
+  }
+ }finally{await new Promise(resolve=>server.close(resolve));}
+});
 const input=()=>({points:[{lat:29.76,lng:-95.37},{lat:29.76,lng:-95.369},{lat:29.759,lng:-95.369},{lat:29.759,lng:-95.37}],query:'User supplied location',priorities:{purpose:'Housing conversations',matters:'',exploring:false,choices:['Understand local housing needs']}});
 const quote='Residential uses require approval under the conditions of this section.';
 const evidence=()=>({schemaVersion:2,caseId:'fixture-records',status:'preliminary',assessmentScope:'matched-site',code:['code-1'],parcel:{id:'parcel-A',mappedSquareMeters:1000},zones:[{id:'R'}],locality:{label:'Fixture authority',boundaryUncertain:false},gaps:[{id:'access',title:'Access remains unresolved'}],sources:[{id:'code-1',kind:'code-provision',text:quote,title:'Residential uses'}]});

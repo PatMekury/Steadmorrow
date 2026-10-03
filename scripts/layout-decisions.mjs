@@ -17,7 +17,14 @@ export function explicitSelections(args,{options,concepts,reviews,planVersion}){
   const ids=new Set(),explored=[];
   for(const choice of args.selections){
     const option=options.find(o=>o.id===choice.option_id),concept=concepts.get(choice.concept_id),review=reviews.get(choice.concept_id);
-    if(!option||ids.has(option.id)||concept?.optionId!==option.id||concept.planVersion!==planVersion||!review||review.id!==choice.review_id||review.verdict==='revise'||!designRationale(choice.rationale))throw new Error('Choose an exact current option, concept and accepted review, with its own design rationale; omit numeric, legal, financial or safety conclusions.');
+    if(!option)throw new Error('Unknown option '+choice.option_id+'. Choose a current option ID.');
+    if(ids.has(option.id))throw new Error('Select exactly one test version for '+option.id+'.');
+    if(!concept||concept.optionId!==option.id)throw new Error('The selected concept does not belong to '+option.id+'. Choose its conceptId/reviewId pair from selectionChoices.');
+    if(concept.planVersion!==planVersion)throw new Error('This concept belongs to an earlier plan; choose a current test for '+option.id+'.');
+    if(!review)throw new Error('Review concept '+concept.id+' before selecting it.');
+    if(review.id!==choice.review_id)throw new Error('For concept '+concept.id+' the current review_id is '+review.id+'. Use this exact pair; another review or an older review ID cannot be selected.');
+    if(review.verdict==='revise')throw new Error('Concept '+concept.id+' still has a revise verdict. Test the proposed change or record a justified current review before selecting it.');
+    if(!designRationale(choice.rationale))throw new Error('The rationale for '+option.id+' must describe design tradeoffs only, without digits or legal, approval, safety or financial claims. Keep the valid concept/review IDs and change only that rationale; no new layout test or review is needed.');
     if(concept.buildings.length&&review.verdict!=='ready-to-compare')throw new Error('A displayed option needs a ready-to-compare review.');
     ids.add(option.id);explored.push({...option,concept,review,reviewed:true,rationale:choice.rationale});
   }

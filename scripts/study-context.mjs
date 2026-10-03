@@ -31,16 +31,17 @@ export function studyMessageView(value){
   const view=studyView(value),state=view.studyState;
   if(!state?.brief){
     return {...view,propertyEvidence:{concernBrief:view.propertyEvidence?.concernBrief??[]},
-      measuredSiteShape:undefined,eligibleHousingPassages:undefined,priorTestHistory:[],previousScenario:undefined};
+      completedAssessment:undefined,measuredSiteShape:undefined,eligibleHousingPassages:undefined,priorTestHistory:[],previousScenario:undefined};
   }
-  const active=new Set((state.concepts??[]).map(c=>c.id));
+  const identity=c=>JSON.stringify([c?.id,c?.planVersion,c?.evidenceVersion]);
+  const active=new Set((state.concepts??[]).map(identity));
   for(const concept of state.concepts??[]){
     // The accepted option holds this exact brief once, including all citations.
     if(state.options?.some(o=>o.id===concept.optionId)){
       delete concept.designBrief;concept.designBriefOptionId=concept.optionId;
     }
   }
-  view.priorTestHistory=(view.priorTestHistory??[]).filter(t=>!active.has(t.concept?.id)).map(t=>{
+  view.priorTestHistory=(view.priorTestHistory??[]).filter(t=>!active.has(identity(t.concept))).map(t=>{
     const c=t.concept;
     if(!c)return t;
     return {archived:true,concept:{id:c.id,optionId:c.optionId,planVersion:c.planVersion,evidenceVersion:c.evidenceVersion,
@@ -63,6 +64,13 @@ export function studyMessageView(value){
     return result;
   };
   view.studyState=references(state);
+  for(const priority of view.studyState.brief??[]){
+    if(priority.answer?.receipts)priority.answer.receipts=priority.answer.receipts.map(receipt=>{
+      const canonical=state.effects?.find(r=>r.id===receipt.id);
+      return canonical?{id:receipt.id,kind:receipt.kind,conceptId:receipt.conceptId,
+        storedIn:'studyState.effects; full measurements and qualifications are retained there.'}:receipt;
+    });
+  }
   view.completedAssessment=references(view.completedAssessment);
   view.priorTestHistory=references(view.priorTestHistory);
   return view;
@@ -73,8 +81,12 @@ export function studyExchangeView(tool,output){
   if(['plan_housing_options','revise_housing_plan'].includes(tool))return {
     status:output.status,planVersion:output.planVersion,review:output.review,
     storedIn:'studyState.options: the accepted options and full design briefs are in the current state.'};
-  if(tool==='review_layout')return {id:output.id,status:output.status,metrics:output.metrics,review:output.review,
+  if(['test_layout','review_layout'].includes(tool))return {id:output.id,status:output.status,metrics:output.metrics,observationId:output.observationId,
+    ignoredParameters:output.ignoredParameters,parameterNotes:output.parameterNotes,
     storedIn:'studyState.concepts and studyState.reviews'};
+  if(['assess_surroundings','submit_priority_answer','answer_priority'].includes(tool))return {
+    id:output.id,status:output.status,conceptId:output.conceptId,
+    storedIn:'studyState.brief, studyState.effects and propertyEvidence.priorityMeasurements hold the complete current answer and receipts.'};
   return studyView(output);
 }
 
@@ -84,6 +96,22 @@ export function studyFailure(error){
   if(!timedOut)return error;
   return Object.assign(new Error('The housing study ran out of time before its final check. Your property findings and concerns are saved. Retry the housing study.'),
     {status:504,cause:error,diagnostic:{code:'STUDY_TIMEOUT'}});
+}
+
+export function studyCompletionChecks({options,concepts,reviews,priorityStateVersion,hasSelectedEffects}){
+  const optionsNeedingTests=[],optionsNeedingCurrentCritique=[],optionsNeedingEffects=[],selectionChoices=[];
+  for(const option of options??[]){
+    if(option.useStatus==='unresolved')continue;
+    const tests=concepts.filter(c=>c.optionId===option.id),placed=tests.filter(c=>c.buildings.length);
+    const candidates=placed.length?placed:tests;
+    for(const c of candidates){const r=reviews.get(c.id);if(r?.priorityStateVersion===priorityStateVersion&&r.verdict===(c.buildings.length?'ready-to-compare':'unresolved'))selectionChoices.push({optionId:option.id,conceptId:c.id,reviewId:r.id,status:c.status,canRecommend:hasSelectedEffects(c)});}
+    if(!tests.length){optionsNeedingTests.push({id:option.id,typology:option.typology});continue;}
+    if(!candidates.some(c=>{const r=reviews.get(c.id);return r?.priorityStateVersion===priorityStateVersion&&r.verdict===(c.buildings.length?'ready-to-compare':'unresolved');})){
+      optionsNeedingCurrentCritique.push({optionId:option.id,candidateConceptIds:candidates.map(c=>c.id),instruction:'Choose and review ONE useful test version for this option. Earlier failures stay in history; they do not all need new reviews.'});
+    }
+    if(placed.length&&!placed.some(hasSelectedEffects))optionsNeedingEffects.push({optionId:option.id,candidateConceptIds:placed.map(c=>c.id),instruction:'Measure the version you intend to select, then cite its receipt. Superseded tests do not all need effects checks.'});
+  }
+  return {optionsNeedingTests,optionsNeedingCurrentCritique,optionsNeedingEffects,selectionChoices};
 }
 
 export async function studyUpstreamError(response,{round,onDiagnostic}){
