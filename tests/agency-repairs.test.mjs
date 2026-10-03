@@ -80,6 +80,16 @@ test('unresolved housing can finish factual work without impossible housing-opti
  },(s,p)=>{assert.ok(p.tools.some(t=>t.function.name==='finish_unresolved_study'));return ['finish_unresolved_study',{}];}],{optionCount:3});
  const result=await m.run({assessmentVersion:ref});assert.equal(result.status,'needs-evidence');assert.equal(result.options.length,0);assert.equal(result.brief[1].answer.status,'unresolved');assert.equal(result.concept,null);
 });
+test('a revise verdict cannot be selected and remains reviewable after the bounded tests finish',async()=>{
+ const entry=makeEntry();entry.e.parcel.geometry=entry.e.selectedArea.geometry=rect(0,0,5,5);
+ const attempt=['test_layout',{...params,option_id:'option-1'}];
+ const m=scripted(entry,[['interpret_priorities',{items:[purpose]}],['plan_housing_options',{options:[option]}],attempt,s=>['review_layout',{...judgment(s),verdict:'revise'}],...Array.from({length:5},()=>attempt),(s,p)=>{
+  assert.ok(!p.tools.some(t=>t.function.name==='select_layout'));
+  const review=p.tools.find(t=>t.function.name==='review_layout');assert.ok(review);assert.ok(review.function.parameters.properties.concept_id.enum.includes(s.studyState.concepts[0].id));assert.ok(!review.function.parameters.properties.verdict.enum.includes('revise'));
+  return ['review_layout',judgment(s)];
+ },(s,p)=>{assert.ok(p.tools.some(t=>t.function.name==='select_layout'));return ['select_layout',select(s)];}],{optionCount:3,optionAuditor:async()=>({accepted:true})});
+ const result=await m.run({assessmentVersion:ref});assert.equal(result.status,'no-fit');assert.equal(result.concept.metrics.homes,0);
+});
 
 test('mixed clauses and more than four concerns are covered without a preset research taxonomy',async()=>{
  const matters='Keep the hall and check community restrictions; compare shadow effects; check construction noise; check tree loss; check service capacity';
