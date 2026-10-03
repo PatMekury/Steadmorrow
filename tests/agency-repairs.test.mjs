@@ -262,3 +262,18 @@ test('actual findings service interprets only original user text and publishes c
  assert.equal(result.research.events[0].outcome,'failed');
  assert.equal(result.research.events[1].outcome,'interpreted');
 });
+
+
+test('agent-selected proposal measurements cannot be replaced by generic source caveats',async()=>{
+ const entry=makeEntry('Effects on neighboring structures');let audits=0;
+ const question={...purpose,original_excerpt:entry.input.priorities.matters,label:'Surroundings',kind:'question',measurement_needed:'proposal-surroundings'};
+ const draft={priority_id:'priority-1',status:'partial',answer:'The code leaves engineering checks unresolved.',applicability:'Only preliminary housing standards are known.',evidence_refs:['rule::rule-p1'],unresolved_checks:['Structural surveys remain unavailable.']};
+ const m=scripted(entry,[['interpret_priorities',{items:[purpose,question]}],['submit_priority_answer',draft],s=>{assert.match(s.studyState.lastFeedback,/Plan and test a layout/);assert.equal(audits,0);return ['test_layout',params];},s=>['assess_surroundings',{concept_id:s.studyState.concepts[0].id,priority_id:'priority-1',sample_times:[]}],s=>['submit_priority_answer',{...draft,answer:'This assumed building height is measured; specialist effects remain unresolved.',evidence_refs:['receipt::'+s.studyState.effects[0].id]}],s=>['review_layout',judgment(s)],s=>['select_layout',select(s)]],{priorityAuditor:async()=>{audits++;return {accepted:true};}});
+ const result=await m.run({assessmentVersion:ref});assert.equal(audits,1);assert.equal(result.brief[1].measurementNeeded,'proposal-surroundings');assert.equal(result.brief[1].answer.receipts[0].conceptId,result.concept.id);
+});
+
+test('rejected option revisions preserve the accepted form with actionable recovery',async()=>{
+ const entry=makeEntry();let audits=0;
+ const m=scripted(entry,[['interpret_priorities',{items:[purpose]}],['plan_housing_options',{options:[option]}],['test_layout',{...params,option_id:'option-1'}],s=>['revise_housing_plan',{base_plan_version:s.studyState.planVersion,observation_ids:[s.studyState.concepts[0].observationId],reason:'Try an apartment alternative.',options:[{...option,typology:'apartment'}]}],(s,p)=>{assert.equal(s.studyState.options[0].typology,'detached');assert.deepEqual(p.tools.find(t=>t.function.name==='test_layout').function.parameters.properties.typology.enum,['detached']);return ['test_layout',{...params,option_id:'option-1',typology:'apartment'}];},s=>{assert.match(s.studyState.lastFeedback,/CURRENT accepted plan requires option-1 = detached/);return ['review_layout',judgment(s)];},s=>['select_layout',select(s)]],{optionCount:3,optionAuditor:async()=>++audits===1?{accepted:true,issues:[]}:{accepted:false,issues:[{optionId:'option-1',reason:'Unsupported fixture revision.'}]}});
+ const result=await m.run({assessmentVersion:ref});assert.equal(result.concept.typology,'detached');assert.equal(result.testHistory.length,1);
+});
